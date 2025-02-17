@@ -80,7 +80,7 @@ python -m main +name=two_images_to_interpolated dataset=realestate10k_mini algor
 ```
 
 #### 4. Generating Videos on Other Datasets
-Please refer to our [wiki](https://github.com/kwsong0113/diffusion-forcing-transformer/wiki/Reproducing) for more details.
+Please refer to our [wiki](https://github.com/kwsong0113/diffusion-forcing-transformer/wiki/Inference-%26-Reproducing-Results) for more details.
 
 ### Training
 
