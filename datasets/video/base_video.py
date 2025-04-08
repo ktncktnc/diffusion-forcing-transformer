@@ -255,7 +255,8 @@ class BaseSimpleVideoDataset(BaseVideoDataset):
 
     def __init__(self, cfg: DictConfig, split: SPLIT = "training"):
         super().__init__(cfg, split)
-        self.latent_dir.mkdir(exist_ok=True, parents=True)
+        if hasattr(cfg, "latent_dir"):
+            self.latent_dir.mkdir(exist_ok=True, parents=True)
         # filter videos to only include the ones that have not been preprocessed
         self.metadata = self.exclude_videos_with_latents(self.metadata)
 
