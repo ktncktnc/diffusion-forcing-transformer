@@ -1,0 +1,38 @@
+# Important: Be careful when modifying this file! 
+# The fields in file will be overridden by the dataset dependent config file in the `configurations/dataset_experiment` folder so consider making changes there instead! 
+
+defaults:
+  - base_video
+
+save_dir: /vast/s224075134/temporal_diffusion/FAR/datasets/ucf101
+max_frames: 64
+context_length: 5
+frame_skip: 1
+resolution: 64
+data_mean: [[[0.3965]], [[0.3754]], [[0.3503]]]
+data_std: [[[0.2725]], [[0.2665]], [[0.2717]]]
+filter_min_len: null
+video_preprocessing: mp4
+num_eval_videos: 6144
+augmentation:
+  p: 0.9
+  xflip: 0.5
+  yflip: 0.5
+  rotate_int: 1
+  translate_int: 1
+  scale: 0.5
+  
+
+num_eval_videos: 6144
+subdataset_size: 3840
+latent:
+  enable: False
+  downsampling_factor: [1, 8] 
+  suffix: null
+external_cond_dim: 0
+external_cond_stack: false # Whether to stack external conditioning across skipped frames
+external_cond_processing: null # How to process external conditioning
+# Data loading configuration
+preload: false # Preload the dataset into CPU memory for faster data loading
+num_eval_videos: null # Number of video clips to be used for evaluation, setting this ensures that evaluation clips are consistent across runs
+frame_skip: 1 # Stride for sampling frames
