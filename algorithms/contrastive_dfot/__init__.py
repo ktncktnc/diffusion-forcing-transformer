@@ -1,2 +1,2 @@
-from .dfot_video import DFoTVideo
-from .dfot_video_pose import DFoTVideoPose
+from .contrastive_dfot_video import ContrastiveDFoTVideo
+# from .dfot_video_pose import DFoTVideoPose

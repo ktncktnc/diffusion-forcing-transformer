@@ -75,6 +75,13 @@ class UViT3D(BaseBackbone):
             patch_size=patch_size,
         )
 
+        self.contrastive_project = nn.Sequential(
+            nn.Linear(channels[0], self.emb_dim),
+            nn.BatchNorm1d(self.emb_dim),
+            nn.ReLU(),
+            nn.Linear(self.emb_dim, self.emb_dim),
+        )
+
         # --------------------------- Positional embeddings ----------------------------
         # We use a 1D learnable positional embedding or RoPE for every level with transformers
         assert self.pos_emb_type in [
@@ -287,6 +294,7 @@ class UViT3D(BaseBackbone):
         noise_levels: Tensor,
         external_cond: Optional[Tensor] = None,
         external_cond_mask: Optional[Tensor] = None,
+        return_representation: bool = False
     ) -> Tensor:
         """
         Forward pass of the U-ViT backbone.
@@ -331,5 +339,12 @@ class UViT3D(BaseBackbone):
             x = up_block[0](x) + hs_before.pop()
             x = self._run_level(x, emb, i_level, is_up=True)
 
-        x = self.project_output(x)
-        return rearrange(x, "(b t) c h w -> b t c h w", t=self.temporal_length)
+        x_out = self.project_output(x)
+        x_out = rearrange(x_out, "(b t) c h w -> b t c h w", t=self.temporal_length)
+        
+        if return_representation:
+            h = self.contrastive_project(x_out)
+            h = rearrange(h, "(b t) c h w -> b t c h w")
+            return x_out, h
+        else:
+            return x_out

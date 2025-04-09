@@ -65,5 +65,6 @@ class BaseBackbone(ABC, nn.Module):
         noise_levels: torch.Tensor,
         external_cond: Optional[torch.Tensor] = None,
         external_cond_mask: Optional[torch.Tensor] = None,
+        return_representation: bool = False,
     ):
         raise NotImplementedError

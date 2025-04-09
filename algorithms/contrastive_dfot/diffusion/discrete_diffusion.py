@@ -155,8 +155,10 @@ class DiscreteDiffusion(nn.Module):
     def add_shape_channels(self, x):
         return rearrange(x, f"... -> ...{' 1' * len(self.x_shape)}")
 
-    def model_predictions(self, x, k, external_cond=None, external_cond_mask=None):
-        model_output = self.model(x, k, external_cond, external_cond_mask)
+    def model_predictions(self, x, k, external_cond=None, external_cond_mask=None, return_representation=None):
+        model_output = self.model(x, k, external_cond, external_cond_mask, return_representation=return_representation)
+        if return_representation:
+            return model_output[1]
 
         if self.objective == "pred_noise":
             pred_noise = torch.clamp(model_output, -self.clip_noise, self.clip_noise)
@@ -350,6 +352,21 @@ class DiscreteDiffusion(nn.Module):
         loss = loss * loss_weight
 
         return x_pred, loss
+    
+    def forward_representation(
+        self,
+        x: torch.Tensor,
+        external_cond: Optional[torch.Tensor],
+        k: torch.Tensor, 
+        return_representation: str
+    ):
+        noise = torch.randn_like(x)
+        noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+
+        noised_x = self.q_sample(x_start=x, k=k, noise=noise)
+        representation = self.model_predictions(x=noised_x, k=k, external_cond=external_cond, return_representation=return_representation)
+        return representation
+        
 
     def ddim_idx_to_noise_level(self, indices: torch.Tensor):
         shape = indices.shape

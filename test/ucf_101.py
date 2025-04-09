@@ -16,13 +16,13 @@ dataset = UCF101AdvancedVideoDataset(cfg, split='training')
 print(dataset)
 item = dataset[1]
 
-print(item['videos'].shape)
+print(item['augmented_videos'].shape)
 print(item['nonterminal'].shape)
 
 # save video
 import cv2
 import numpy as np
-video = item['videos'].numpy()
+video = item['augmented_videos'].numpy()
 video = np.transpose(video, (0, 2, 3, 1))
 video = (video * 255).astype(np.uint8)
 video_path = '/home/s224075134/diffusion-forcing-transformer/test/video.mp4'

@@ -200,7 +200,7 @@ class DiTBase(nn.Module):
             return checkpoint(module, *args, use_reentrant=False)
         return module(*args)
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor, return_representation: bool = True) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, c: torch.Tensor, return_representation: bool=True) -> torch.Tensor:
         """
         Forward pass of the DiTBase model.
         Args:

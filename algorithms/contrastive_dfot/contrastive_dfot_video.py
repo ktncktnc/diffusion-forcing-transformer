@@ -25,6 +25,7 @@ from .diffusion import (
     ContinuousDiffusion,
 )
 from .history_guidance import HistoryGuidance
+from .losses import InfoNCELoss, global_local_temporal_contrastive
 
 
 class ContrastiveDFoTVideo(BasePytorchAlgo):
@@ -123,7 +124,7 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
         else:
             self.vae = None
 
-        # 3. Metrics
+        # 4. Metrics
         if len(self.tasks) == 0:
             return
         registry = SharedVideoMetricModelRegistry()
@@ -282,6 +283,7 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
                 gt_videos = batch["videos"]
         else:
             xs = batch["videos"]
+            augmented_xs = batch["augmented_videos"]
         xs = self._normalize_x(xs)
 
         # 2. Prepare external conditions
@@ -295,16 +297,19 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
         else:
             masks = torch.ones(*xs.shape[:2]).bool().to(self.device)
 
-        return xs, conditions, masks, gt_videos
+        return {
+            'xs': xs,
+            'augmented_xs': augmented_xs,
+            'conditions': conditions,
+            'masks': masks,
+            'gt_videos': gt_videos,
+        }
 
     # ---------------------------------------------------------------------
     # Training
     # ---------------------------------------------------------------------
 
-    def training_step(self, batch, batch_idx, namespace="training") -> STEP_OUTPUT:
-        """Training step"""
-        xs, conditions, masks, *_ = batch
-
+    def training_diffusion_step(self, xs, masks, conditions):
         noise_levels, masks = self._get_training_noise_levels(xs, masks)
         xs_pred, loss = self.diffusion_model(
             xs,
@@ -312,11 +317,128 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
             k=noise_levels,
         )
         loss = self._reweight_loss(loss, masks)
+        output_dict = {
+            "loss": loss,
+            "xs_pred": xs_pred,
+            "xs": xs,
+            "noise_levels": noise_levels
+        }
+
+        return output_dict
+    
+    def training_contrastive_step(self, xs, augmented_xs, masks, conditions, noise_levels):
+        batch_size = xs.shape[0]
+        n_clips = xs.shape[1] // self.cfg.clip_frames
+
+        dense_xs = rearrange(xs, 'b (c t) ... -> (b c) t ...', t=self.cfg.clip_frames)
+        a_dense_xs = rearrange(augmented_xs, 'b (c t) ... -> (b c) t ...', t=self.cfg.clip_frames)
+        dense_conditions = rearrange(conditions, 'b (c t) ... -> (b c) t ...', t=self.cfg.clip_frames) if conditions is not None else None
+        dense_masks = rearrange(masks, 'b (c t) ... -> (b c) t ...', t=self.cfg.clip_frames)
+        dense_noise_levels = rearrange(noise_levels, 'b (c t) -> (b c) t', t=self.cfg.clip_frames)
+
+
+        sparse_idx = torch.arange(0, self.cfg.clip_frames, self.frame_skip)
+        sparse_xs = xs[:, sparse_idx, ...]
+        a_sparse_xs = augmented_xs[:, sparse_idx, ...]
+        sparse_conditions = conditions[:, sparse_idx, ...] if conditions is not None else None
+        sparse_masks = masks[:, sparse_idx, ...]
+        sparse_noise_levels = noise_levels[:, sparse_idx, ...] if noise_levels is not None else None
+
+        sparse_rep = self.diffusion_model.forward_representation(
+            torch.cat([sparse_xs, a_sparse_xs], dim=0),
+            torch.cat([self._process_conditions(sparse_conditions)]*2, dim=0) if sparse_conditions is not None else None,
+            k=torch.cat([sparse_noise_levels, sparse_noise_levels], dim=0),
+            return_representation='s'
+        )
+
+        dense_rep = self.diffusion_model.forward_representation(
+            torch.cat([dense_xs, a_dense_xs], dim=0),
+            torch.cat([self._process_conditions(dense_conditions)]*2, dim=0) if dense_conditions is not None else None,
+            k=torch.cat([dense_noise_levels, dense_noise_levels], dim=0),
+            return_representation='g'
+        )
+        dense_rep = rearrange(dense_rep, '(n b c) d -> n c b d', b=batch_size, n=2) # (N, clips, batch_size, dim)
+
+        if not hasattr(self, "instance_loss"):
+            self.instance_loss = InfoNCELoss(device='cuda', batch_size=batch_size, temperature=0.1, use_cosine_similarity=False)
+            self.local_local_loss = InfoNCELoss(device='cuda', batch_size=n_clips, temperature=0.1, use_cosine_similarity=False)
+
+        # Compute the instance-level contrastive loss
+        sparse_ic_loss = self.instance_loss(sparse_rep[:batch_size], sparse_rep[batch_size:])
+        dense_ic_loss = 0 #TODO: implement
+        for ii in range(2):
+            for jj in range(2):
+                for chunk in range(n_clips):
+                    for chunk1 in range(n_clips):
+                        if (ii == jj and chunk == chunk1):
+                            continue
+                        dense_ic_loss += self.instance_loss(dense_rep[ii][chunk], dense_rep[jj][chunk1])
+
+        local_loss = 0.0
+        for i in range(batch_size):
+            local_loss += self.local_local_loss(dense_rep[0, :, i], dense_rep[1, :, i])
+
+        # for ii in range(2):
+        #     for jj in range(2):
+        #         local_loss += global_local_temporal_contrastive()
+        global_loss = 0.0
+        for ii in range(2):
+            for jj in range(2):
+                global_loss += global_local_temporal_contrastive(torch.stack(out_sparse[ii][1:],dim=1), torch.stack(out_dense[jj],dim=1), params.temperature)
+
+
+        global_loss = 0
+        loss = sparse_ic_loss + dense_ic_loss + local_loss + global_loss
+
+        return loss
+
+    def training_step(self, batch, batch_idx, namespace="training") -> STEP_OUTPUT:
+        """Training step"""
+        #xs, conditions, masks, *_ = batch
+        xs = batch["xs"]
+        augmented_xs = batch["augmented_xs"]
+        conditions = batch["conditions"]
+        masks = batch["masks"]
+        gt_videos = batch["gt_videos"]
+
+        # diffusion loss
+        # noise_levels, masks = self._get_training_noise_levels(xs, masks)
+        # xs_pred, loss = self.diffusion_model(
+        #     xs,
+        #     self._process_conditions(conditions),
+        #     k=noise_levels,
+        # )
+        # loss = self._reweight_loss(loss, masks)
+        diffusion_output = self.training_diffusion_step(xs, masks, self._process_conditions(conditions))
+
+        noise_levels = diffusion_output["noise_levels"]
+        diffusion_loss = diffusion_output["loss"]
+        xs_pred = diffusion_output["xs_pred"]
+
+        c_loss = self.training_contrastive_step(xs, augmented_xs, masks, conditions, noise_levels)
+
+        loss = diffusion_loss + c_loss * self.cfg.contrastive_loss_weight
+        
+
 
         if batch_idx % self.cfg.logging.loss_freq == 0:
             self.log(
                 f"{namespace}/loss",
                 loss,
+                on_step=namespace == "training",
+                on_epoch=namespace != "training",
+                sync_dist=True,
+            )
+            self.log(
+                f"{namespace}/diffusion_loss",
+                diffusion_loss,
+                on_step=namespace == "training",
+                on_epoch=namespace != "training",
+                sync_dist=True,
+            )
+            self.log(
+                f"{namespace}/contrastive_loss",
+                c_loss,
                 on_step=namespace == "training",
                 on_epoch=namespace != "training",
                 sync_dist=True,
@@ -405,16 +527,30 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
 
     def _eval_denoising(self, batch, batch_idx, namespace="training") -> None:
         """Evaluate the denoising performance during training."""
-        xs, conditions, masks, gt_videos = batch
+        # xs, conditions, masks, gt_videos = batch
+        xs = batch["xs"]
+        augmented_xs = batch["augmented_xs"]
+        conditions = batch["conditions"]
+        masks = batch["masks"]
+        gt_videos = batch["gt_videos"]
+
 
         xs = xs[:, : self.max_tokens]
+        augmented_xs = augmented_xs[:, : self.max_tokens]
         if conditions is not None:
             conditions = conditions[:, : self.max_tokens]
         masks = masks[:, : self.max_tokens]
         if gt_videos is not None:
             gt_videos = gt_videos[:, : self.max_frames]
 
-        batch = (xs, conditions, masks, gt_videos)
+        # batch = (xs, conditions, masks, gt_videos)
+        batch = {
+            'xs': xs,
+            'augmented_xs': augmented_xs,
+            'conditions': conditions,
+            'masks': masks,
+            'gt_videos': gt_videos
+        }
         output = self.training_step(batch, batch_idx, namespace=namespace)
 
         gt_videos = gt_videos if self.is_latent_diffusion else output["xs"]
