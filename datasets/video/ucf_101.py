@@ -215,7 +215,6 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
             preprocessed_path = self.video_path_to_preprocessed_path(
                 video_metadata["video_paths"]
             )
-            print('video_metadata["video_paths"]', video_metadata["video_paths"])
             match self.cfg.video_preprocessing:
                 case "npz":
                     video = np.load(
@@ -275,8 +274,9 @@ class UCF101AdvancedVideoDataset(
 
     def _augment(self, video: torch.Tensor) -> torch.Tensor:
         # augment video
-        print('video.shape', video.shape)
-        video = self.augment_pipe(video)
+        # print('video.shape', video.shape)
+        video, label = self.augment_pipe(video)
+        # print('label', label)
         return video
 
     def load_cond(

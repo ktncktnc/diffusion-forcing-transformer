@@ -8,6 +8,31 @@ from ..base_backbone import BaseBackbone
 from .dit_base import DiTBase
 
 
+class RepresentationProjection(nn.Module):
+    def __init__(self, in_dim: int, out_dim: int):
+        super().__init__()
+        self.temporal_pooling = nn.AdaptiveAvgPool3d((1,None,None))
+        self.spatial_cnn = nn.Sequential(
+            nn.Conv2d(in_dim, 512, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1))
+        )
+        self.fc = nn.Linear(512, out_dim)
+
+    def forward(self, x: torch.Tensor, b, type='s') -> torch.Tensor: 
+        # x shape: ((B,T),C,H,W)
+        x = self.spatial_cnn(x)
+        x = rearrange(x, "(b t) c h w -> b c t h w", b=b)  # (B, C, T, H, W)
+        grs = self.temporal_pooling(x)[:, :, 0, 0, 0]  # (B, C)
+        grs = self.fc(grs)  # (B, C)
+        if type == 'g':
+            return grs
+        elif type == 's':
+            x = self.fc(rearrange(x[:, :, :, 0, 0], 'b c t -> b t c'))  # (B, T, C)
+            x = torch.cat([grs.unsqueeze(1), x], dim=1)  # (B, T+1, C)
+            return x
+
+
 class DiT3D(BaseBackbone):
 
     def __init__(
@@ -61,6 +86,9 @@ class DiT3D(BaseBackbone):
             learn_sigma=False,
             use_gradient_checkpointing=cfg.use_gradient_checkpointing,
         )
+
+        self.representation_proj = RepresentationProjection(hidden_size, hidden_size)
+
         self.initialize_weights()
 
     @property
@@ -121,6 +149,7 @@ class DiT3D(BaseBackbone):
         noise_levels: torch.Tensor,
         external_cond: Optional[torch.Tensor] = None,
         external_cond_mask: Optional[torch.Tensor] = None,
+        return_representation: str = "s",
     ) -> torch.Tensor:
         input_batch_size = x.shape[0]
         x = rearrange(x, "b t c h w -> (b t) c h w")
@@ -133,11 +162,21 @@ class DiT3D(BaseBackbone):
             emb = emb + self.external_cond_embedding(external_cond, external_cond_mask)
         emb = repeat(emb, "b t c -> b (t p) c", p=self.num_patches)
 
-        x = self.dit_base(x, emb)  # (B, N, C)
+        output = self.dit_base(x, emb, return_representation=return_representation)  # (B, N, C)
+        if return_representation:
+            x, h = output
+            h = self.unpatchify(rearrange(h, 'b (t p) c -> (b t) p c', p=self.num_patches))
+            h = self.representation_proj(h, b=input_batch_size, type=return_representation)
+        else:
+            x = output
+        
         x = self.unpatchify(
             rearrange(x, "b (t p) c -> (b t) p c", p=self.num_patches)
         )  # (B * T, H, W, C)
         x = rearrange(
             x, "(b t) h w c -> b t c h w", b=input_batch_size
         )  # (B, T, C, H, W)
+        
+        if return_representation:
+            return x, h
         return x

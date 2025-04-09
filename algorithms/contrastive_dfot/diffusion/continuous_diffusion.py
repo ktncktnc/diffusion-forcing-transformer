@@ -163,3 +163,19 @@ class ContinuousDiffusion(DiscreteDiffusion):
         loss = loss * loss_weight
 
         return x_pred, loss
+
+    def forward_representation(
+        self,
+        x: torch.Tensor,
+        external_cond: Optional[torch.Tensor],
+        k: torch.Tensor, 
+    ):
+        logsnr = self.training_schedule(k)
+        noise = torch.randn_like(x)
+        noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+        alpha_t = self.add_shape_channels(torch.sigmoid(logsnr).sqrt())
+        sigma_t = self.add_shape_channels(torch.sigmoid(-logsnr).sqrt())
+        x_t = alpha_t * x + sigma_t * noise
+
+        pred = self.model(x_t, self.precond_scale * logsnr, external_cond, return_representation=True)
+        return pred[1]

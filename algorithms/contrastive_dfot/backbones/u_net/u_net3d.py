@@ -165,6 +165,7 @@ class Unet3D(BaseBackbone):
             curr_resolution //= 2 if not is_last else 1
 
         self.out = nn.Sequential(block_klass(dim * 2, dim), nn.Conv3d(dim, out_dim, 1))
+        self.contrastive_projection = nn.Sequential(block_klass(dim * 2, dim), nn.Conv3d(dim, out_dim, 1))
 
     @property
     def noise_level_emb_dim(self):
@@ -180,6 +181,7 @@ class Unet3D(BaseBackbone):
         noise_levels: torch.Tensor,
         external_cond: Optional[torch.Tensor] = None,
         external_cond_mask: Optional[torch.Tensor] = None,
+        return_representation: bool = False,
     ):
         x = rearrange(x, "b t c h w -> b c t h w").contiguous()
 
@@ -208,8 +210,15 @@ class Unet3D(BaseBackbone):
         for block in self.up_blocks:
             h = torch.cat([h, hs.pop()], dim=1)
             h = block(h, emb)
-
-        h = torch.cat([h, x], dim=1)
-        x = self.out(h)
+        
+        
+        h_out = torch.cat([h, x], dim=1)
+        x = self.out(h_out)
         x = rearrange(x, " b c t h w -> b t c h w")
-        return x
+        
+        if return_representation:
+            h = self.contrastive_projection(h_out)
+            h = rearrange(h, " b c t h w -> b t c h w")
+            return x, h
+        else:
+            return x

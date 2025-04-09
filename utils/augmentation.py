@@ -130,6 +130,20 @@ def scale2d_inv(sx, sy, **kwargs):
 def rotate2d_inv(theta, **kwargs):
     return rotate2d(-theta, **kwargs)
 
+# def randint_repeat_interleave(shape, dim, repeats, device='cpu', **args):
+#     return torch.repeat_interleave(
+#             torch.randint(shape[0], shape[1:], device=device, **args),
+#         repeats=repeats, dim=dim)
+
+# def randn_repeat_interleave(shape, dim, repeats, device='cpu', **args):
+#     return torch.repeat_interleave(
+#             torch.randn(shape[0], shape[1:], device=device, **args),
+#         repeats=repeats, dim=dim)
+
+def execute_and_repeat(func, dim, repeats, **args):
+    return torch.repeat_interleave(func(**args), repeats=repeats, dim=dim)
+
+
 #----------------------------------------------------------------------------
 # Augmentation pipeline main class.
 # All augmentations are disabled by default; individual augmentations can
@@ -137,7 +151,7 @@ def rotate2d_inv(theta, **kwargs):
 
 class AugmentPipe:
     def __init__(self, p=1,
-        xflip=0.1, yflip=0.1, rotate_int=0, translate_int=0, translate_int_max=0.065,
+        xflip=0, yflip=0, rotate_int=0, translate_int=0, translate_int_max=0.125,
         scale=0, rotate_frac=0, aniso=0, translate_frac=0, scale_std=0.2, rotate_frac_max=1, aniso_std=0.2, aniso_rotate_prob=0.5, translate_frac_std=0.125,
         brightness=0, contrast=0, lumaflip=0, hue=0, saturation=0, brightness_std=0.2, contrast_std=0.5, hue_max=1, saturation_std=1,
     ):
@@ -173,47 +187,61 @@ class AugmentPipe:
         self.hue_max            = float(hue_max)            # Range of hue rotation, 1 = full circle.
         self.saturation_std     = float(saturation_std)     # Log2 standard deviation of saturation.
 
-    def __call__(self, videos):
-        T, C, H, W = videos.shape
-        N = 1
-        # videos = videos.reshape(N*T, C, H, W)
-
-        device = videos.device
-        labels = [torch.zeros([videos.shape[0], 0], device=device)]
+    def __call__(self, images):
+        N, C, H, W = images.shape
+        device = images.device
+        labels = [torch.zeros([images.shape[0], 0], device=device)]
 
         # ---------------
         # Pixel blitting.
         # ---------------
-
         if self.xflip > 0:
-            w = torch.randint(2, [N, 1, 1, 1], device=device).repeat_interleave(T, dim=0)
-            w = torch.where(torch.rand([N, 1, 1, 1], device=device).repeat_interleave(T, dim=0) < self.xflip * self.p, w, torch.zeros_like(w))
-            videos = torch.where(w == 1, videos.flip(3), videos)
+            # w = torch.randint(2, [N, 1, 1, 1], device=device)
+            # w = randint_repeat_interleave([1,1,1,1], dim=0, repeats=N, device=device, max=2)
+            w = execute_and_repeat(torch.randint, dim=0, repeats=N, high=2, size=[1,1,1,1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1,1,1,1], device=device)
+
+            # w = torch.where(torch.rand([N, 1, 1, 1], device=device) < self.xflip * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.xflip * self.p, w, torch.zeros_like(w))
+            images = torch.where(w == 1, images.flip(3), images)
             labels += [w]
 
         if self.yflip > 0:
-            w = torch.randint(2, [N, 1, 1, 1], device=device).repeat_interleave(T, dim=0)
-            w = torch.where(torch.rand([N, 1, 1, 1], device=device).repeat_interleave(T, dim=0) < self.yflip * self.p, w, torch.zeros_like(w))
-            videos = torch.where(w == 1, videos.flip(2), videos)
+            # w = torch.randint(2, [N, 1, 1, 1], device=device)
+            # w = randint_repeat_interleave([1,1,1,1], dim=0, repeats=N, device=device, max=2)
+            w = execute_and_repeat(torch.randint, dim=0, repeats=N, high=2, size=[1,1,1,1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1,1,1,1], device=device)
+            w = torch.where(prob < self.yflip * self.p, w, torch.zeros_like(w))
+            images = torch.where(w == 1, images.flip(2), images)
             labels += [w]
 
         if self.rotate_int > 0:
-            w = torch.randint(4, [N, 1, 1, 1], device=device).repeat_interleave(T, dim=0)
-            w = torch.where(torch.rand([N, 1, 1, 1], device=device).repeat_interleave(T, dim=0) < self.rotate_int * self.p, w, torch.zeros_like(w))
-            videos = torch.where((w == 1) | (w == 2), videos.flip(3), videos)
-            videos = torch.where((w == 2) | (w == 3), videos.flip(2), videos)
-            videos = torch.where((w == 1) | (w == 3), videos.transpose(2, 3), videos)
+            # w = torch.randint(4, [N, 1, 1, 1], device=device)
+            # w = randint_repeat_interleave([1,1,1,1], dim=0, repeats=N, device=device, max=4)
+            w = execute_and_repeat(torch.randint, dim=0, repeats=N, high=4, size=[1,1,1,1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1,1,1,1], device=device)
+
+            #w = torch.where(torch.rand([N, 1, 1, 1], device=device) < self.rotate_int * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.rotate_int * self.p, w, torch.zeros_like(w))
+            images = torch.where((w == 1) | (w == 2), images.flip(3), images)
+            images = torch.where((w == 2) | (w == 3), images.flip(2), images)
+            images = torch.where((w == 1) | (w == 3), images.transpose(2, 3), images)
             labels += [(w == 1) | (w == 2), (w == 2) | (w == 3)]
 
         if self.translate_int > 0:
-            w = torch.rand([2, N, 1, 1, 1], device=device).repeat_interleave(T, dim=1) * 2 - 1
-            w = torch.where(torch.rand([1, N, 1, 1, 1], device=device).repeat_interleave(T, dim=1) < self.translate_int * self.p, w, torch.zeros_like(w))
+            # w = torch.rand([2, N, 1, 1, 1], device=device) * 2 - 1
+            # w = randint_repeat_interleave([2,1,1,1,1], dim=1, repeats=N, device=device, max=2)
+            w = execute_and_repeat(torch.randint, dim=1, repeats=N, high=2, size=[2,1,1,1,1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=1, repeats=N, size=[1,1,1,1,1], device=device)
+            
+            # w = torch.where(torch.rand([1, N, 1, 1, 1], device=device) < self.translate_int * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.translate_int * self.p, w, torch.zeros_like(w))
             tx = w[0].mul(W * self.translate_int_max).round().to(torch.int64)
             ty = w[1].mul(H * self.translate_int_max).round().to(torch.int64)
-            b, c, y, x = torch.meshgrid(*(torch.arange(x, device=device) for x in videos.shape), indexing='ij')
+            b, c, y, x = torch.meshgrid(*(torch.arange(x, device=device) for x in images.shape), indexing='ij')
             x = W - 1 - (W - 1 - (x - tx) % (W * 2 - 2)).abs()
             y = H - 1 - (H - 1 - (y + ty) % (H * 2 - 2)).abs()
-            videos = videos.flatten()[(((b * C) + c) * H + y) * W + x]
+            images = images.flatten()[(((b * C) + c) * H + y) * W + x]
             labels += [tx.div(W * self.translate_int_max), ty.div(H * self.translate_int_max)]
 
         # ------------------------------------------------
@@ -224,30 +252,47 @@ class AugmentPipe:
         G_inv = I_3
 
         if self.scale > 0:
-            w = torch.randn([N], device=device).repeat_interleave(T, dim=0)
-            w = torch.where(torch.rand([N], device=device).repeat_interleave(T, dim=0) < self.scale * self.p, w, torch.zeros_like(w))
+            # w = torch.randn([N], device=device)
+            w = execute_and_repeat(torch.randn, dim=0, repeats=N, size=[1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device)
+
+            # w = torch.where(torch.rand([N], device=device) < self.scale * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.scale * self.p, w, torch.zeros_like(w))
             s = w.mul(self.scale_std).exp2()
             G_inv = G_inv @ scale2d_inv(s, s)
             labels += [w]
 
         if self.rotate_frac > 0:
-            w = (torch.rand([N], device=device).repeat_interleave(T, dim=0) * 2 - 1) * (np.pi * self.rotate_frac_max)
-            w = torch.where(torch.rand([N], device=device).repeat_interleave(T, dim=0) < self.rotate_frac * self.p, w, torch.zeros_like(w))
+            # w = (torch.rand([N], device=device) * 2 - 1) * (np.pi * self.rotate_frac_max)
+            w = (execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device) * 2 - 1) * (np.pi * self.rotate_frac_max)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device)
+            # w = torch.where(torch.rand([N], device=device) < self.rotate_frac * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.rotate_frac * self.p, w, torch.zeros_like(w))
             G_inv = G_inv @ rotate2d_inv(-w)
             labels += [w.cos() - 1, w.sin()]
 
         if self.aniso > 0:
-            w = torch.randn([N], device=device).repeat_interleave(T, dim=0)
-            r = (torch.rand([N], device=device).repeat_interleave(T, dim=0) * 2 - 1) * np.pi
-            w = torch.where(torch.rand([N], device=device).repeat_interleave(T, dim=0) < self.aniso * self.p, w, torch.zeros_like(w))
-            r = torch.where(torch.rand([N], device=device).repeat_interleave(T, dim=0) < self.aniso_rotate_prob, r, torch.zeros_like(r))
+            # w = torch.randn([N], device=device)
+            w = execute_and_repeat(torch.randn, dim=0, repeats=N, size=[1], device=device)
+            # r = (torch.rand([N], device=device) * 2 - 1) * np.pi
+            r = (execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device) * 2 - 1) * np.pi
+            prob_w = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device)
+            prob_r = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device)
+
+            # w = torch.where(torch.rand([N], device=device) < self.aniso * self.p, w, torch.zeros_like(w))
+            # r = torch.where(torch.rand([N], device=device) < self.aniso_rotate_prob, r, torch.zeros_like(r))
+            w = torch.where(prob_w < self.aniso * self.p, w, torch.zeros_like(w))
+            r = torch.where(prob_r < self.aniso_rotate_prob, r, torch.zeros_like(r))
             s = w.mul(self.aniso_std).exp2()
             G_inv = G_inv @ rotate2d_inv(r) @ scale2d_inv(s, 1 / s) @ rotate2d_inv(-r)
             labels += [w * r.cos(), w * r.sin()]
 
         if self.translate_frac > 0:
-            w = torch.randn([2, N], device=device).repeat_interleave(T, dim=1)
-            w = torch.where(torch.rand([1, N], device=device).repeat_interleave(T, dim=1) < self.translate_frac * self.p, w, torch.zeros_like(w))
+            # w = torch.randn([2, N], device=device)
+            w = execute_and_repeat(torch.randn, dim=1, repeats=N, size=[2,1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=1, repeats=N, size=[1,1], device=device)
+            # w = torch.where(torch.rand([1, N], device=device) < self.translate_frac * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.translate_frac * self.p, w, torch.zeros_like(w))
             G_inv = G_inv @ translate2d_inv(w[0].mul(W * self.translate_frac_std), w[1].mul(H * self.translate_frac_std))
             labels += [w[0], w[1]]
 
@@ -270,34 +315,30 @@ class AugmentPipe:
             mx0, my0, mx1, my1 = margin.ceil().to(torch.int32)
 
             # Pad image and adjust origin.
-            print('videos', videos.shape)
-            videos = torch.nn.functional.pad(input=videos, pad=[mx0,mx1,my0,my1], mode='reflect')
-
+            images = torch.nn.functional.pad(input=images, pad=[mx0,mx1,my0,my1], mode='reflect')
             G_inv = translate2d((mx0 - mx1) / 2, (my0 - my1) / 2) @ G_inv
 
             # Upsample.
-            conv_weight = constant(Hz[None, None, ::-1], dtype=videos.dtype, device=videos.device).tile([videos.shape[1], 1, 1])
+            conv_weight = constant(Hz[None, None, ::-1], dtype=images.dtype, device=images.device).tile([images.shape[1], 1, 1])
             conv_pad = (len(Hz) + 1) // 2
-            videos = torch.stack([videos, torch.zeros_like(videos)], dim=4).reshape(N, C, videos.shape[2], -1)[:, :, :, :-1]
-            videos = torch.nn.functional.conv2d(videos, conv_weight.unsqueeze(2), groups=videos.shape[1], padding=[0,conv_pad])
-            videos = torch.stack([videos, torch.zeros_like(videos)], dim=3).reshape(N, C, -1, videos.shape[3])[:, :, :-1, :]
-            videos = torch.nn.functional.conv2d(videos, conv_weight.unsqueeze(3), groups=videos.shape[1], padding=[conv_pad,0])
+            images = torch.stack([images, torch.zeros_like(images)], dim=4).reshape(N, C, images.shape[2], -1)[:, :, :, :-1]
+            images = torch.nn.functional.conv2d(images, conv_weight.unsqueeze(2), groups=images.shape[1], padding=[0,conv_pad])
+            images = torch.stack([images, torch.zeros_like(images)], dim=3).reshape(N, C, -1, images.shape[3])[:, :, :-1, :]
+            images = torch.nn.functional.conv2d(images, conv_weight.unsqueeze(3), groups=images.shape[1], padding=[conv_pad,0])
             G_inv = scale2d(2, 2, device=device) @ G_inv @ scale2d_inv(2, 2, device=device)
             G_inv = translate2d(-0.5, -0.5, device=device) @ G_inv @ translate2d_inv(-0.5, -0.5, device=device)
-            print('videos', videos.shape)
 
             # Execute transformation.
-            shape = [N*T, C, (H + Hz_pad * 2) * 2, (W + Hz_pad * 2) * 2]
-            G_inv = scale2d(2 / videos.shape[3], 2 / videos.shape[2], device=device) @ G_inv @ scale2d_inv(2 / shape[3], 2 / shape[2], device=device)
+            shape = [N, C, (H + Hz_pad * 2) * 2, (W + Hz_pad * 2) * 2]
+            G_inv = scale2d(2 / images.shape[3], 2 / images.shape[2], device=device) @ G_inv @ scale2d_inv(2 / shape[3], 2 / shape[2], device=device)
             grid = torch.nn.functional.affine_grid(theta=G_inv[:,:2,:], size=shape, align_corners=False)
-
-            videos = torch.nn.functional.grid_sample(videos, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
+            images = torch.nn.functional.grid_sample(images, grid, mode='bilinear', padding_mode='zeros', align_corners=False)
 
             # Downsample and crop.
-            conv_weight = constant(Hz[None, None, :], dtype=videos.dtype, device=videos.device).tile([videos.shape[1], 1, 1])
+            conv_weight = constant(Hz[None, None, :], dtype=images.dtype, device=images.device).tile([images.shape[1], 1, 1])
             conv_pad = (len(Hz) - 1) // 2
-            videos = torch.nn.functional.conv2d(videos, conv_weight.unsqueeze(2), groups=videos.shape[1], stride=[1,2], padding=[0,conv_pad])[:, :, :, Hz_pad : -Hz_pad]
-            videos = torch.nn.functional.conv2d(videos, conv_weight.unsqueeze(3), groups=videos.shape[1], stride=[2,1], padding=[conv_pad,0])[:, :, Hz_pad : -Hz_pad, :]
+            images = torch.nn.functional.conv2d(images, conv_weight.unsqueeze(2), groups=images.shape[1], stride=[1,2], padding=[0,conv_pad])[:, :, :, Hz_pad : -Hz_pad]
+            images = torch.nn.functional.conv2d(images, conv_weight.unsqueeze(3), groups=images.shape[1], stride=[2,1], padding=[conv_pad,0])[:, :, Hz_pad : -Hz_pad, :]
 
         # --------------------------------------------
         # Select parameters for color transformations.
@@ -308,34 +349,48 @@ class AugmentPipe:
         luma_axis = constant(np.asarray([1, 1, 1, 0]) / np.sqrt(3), device=device)
 
         if self.brightness > 0:
-            w = torch.randn([N], device=device).repeat_interleave(T, dim=0)
-            w = torch.where(torch.rand([N], device=device).repeat_interleave(T, dim=0) < self.brightness * self.p, w, torch.zeros_like(w))
+            # w = torch.randn([N], device=device)
+            w = execute_and_repeat(torch.randn, dim=0, repeats=N, size=[1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device)
+            # w = torch.where(torch.rand([N], device=device) < self.brightness * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.brightness * self.p, w, torch.zeros_like(w))
             b = w * self.brightness_std
             M = translate3d(b, b, b) @ M
             labels += [w]
 
         if self.contrast > 0:
-            w = torch.randn([N], device=device).repeat_interleave(T, dim=0)
-            w = torch.where(torch.rand([N], device=device).repeat_interleave(T, dim=0) < self.contrast * self.p, w, torch.zeros_like(w))
+            # w = torch.randn([N], device=device)
+            w = execute_and_repeat(torch.randn, dim=0, repeats=N, size=[1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device)
+            w = torch.where(prob < self.contrast * self.p, w, torch.zeros_like(w))
             c = w.mul(self.contrast_std).exp2()
             M = scale3d(c, c, c) @ M
             labels += [w]
 
         if self.lumaflip > 0:
-            w = torch.randint(2, [N, 1, 1], device=device).repeat_interleave(T, dim=0)
-            w = torch.where(torch.rand([N, 1, 1], device=device).repeat_interleave(T, dim=0) < self.lumaflip * self.p, w, torch.zeros_like(w))
+            w = torch.randint(2, [N, 1, 1], device=device)
+            w = execute_and_repeat(torch.randint, dim=0, repeats=N, high=2, size=[1,1,1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1,1,1], device=device)
+            # w = torch.where(torch.rand([N, 1, 1], device=device) < self.lumaflip * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.lumaflip * self.p, w, torch.zeros_like(w))
             M = (I_4 - 2 * luma_axis.ger(luma_axis) * w) @ M
             labels += [w]
 
         if self.hue > 0:
-            w = (torch.rand([N], device=device).repeat_interleave(T, dim=0) * 2 - 1) * (np.pi * self.hue_max)
-            w = torch.where(torch.rand([N], device=device).repeat_interleave(T, dim=0) < self.hue * self.p, w, torch.zeros_like(w))
+            # w = (torch.rand([N], device=device) * 2 - 1) * (np.pi * self.hue_max)
+            w = (execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device) * 2 - 1) * (np.pi * self.hue_max)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1], device=device)
+            # w = torch.where(torch.rand([N], device=device) < self.hue * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.hue * self.p, w, torch.zeros_like(w))
             M = rotate3d(luma_axis, w) @ M
             labels += [w.cos() - 1, w.sin()]
 
         if self.saturation > 0:
-            w = torch.randn([N, 1, 1], device=device).repeat_interleave(T, dim=0)
-            w = torch.where(torch.rand([N, 1, 1], device=device).repeat_interleave(T, dim=0) < self.saturation * self.p, w, torch.zeros_like(w))
+            # w = torch.randn([N, 1, 1], device=device)
+            w = execute_and_repeat(torch.randn, dim=0, repeats=N, size=[1,1,1], device=device)
+            prob = execute_and_repeat(torch.rand, dim=0, repeats=N, size=[1,1,1], device=device)
+            # w = torch.where(torch.rand([N, 1, 1], device=device) < self.saturation * self.p, w, torch.zeros_like(w))
+            w = torch.where(prob < self.saturation * self.p, w, torch.zeros_like(w))
             M = (luma_axis.ger(luma_axis) + (I_4 - luma_axis.ger(luma_axis)) * w.mul(self.saturation_std).exp2()) @ M
             labels += [w]
 
@@ -344,25 +399,17 @@ class AugmentPipe:
         # ------------------------------
 
         if M is not I_4:
-            videos = videos.reshape([N*T, C, H * W])
+            images = images.reshape([N, C, H * W])
             if C == 3:
-                videos = M[:, :3, :3] @ videos + M[:, :3, 3:]
+                images = M[:, :3, :3] @ images + M[:, :3, 3:]
             elif C == 1:
                 M = M[:, :3, :].mean(dim=1, keepdims=True)
-                videos = videos * M[:, :, :3].sum(dim=2, keepdims=True) + M[:, :, 3:]
+                images = images * M[:, :, :3].sum(dim=2, keepdims=True) + M[:, :, 3:]
             else:
                 raise ValueError('Image must be RGB (3 channels) or L (1 channel)')
-            videos = videos.reshape([N, T, C, H, W])
+            images = images.reshape([N, C, H, W])
 
         labels = torch.cat([x.to(torch.float32).reshape(N, -1) for x in labels], dim=1)
-        return videos, labels
-    
-    # def repeat_tensor_over_dim(self, tensor, dim, times):
-    #     """Repeat a tensor over a specified dimension."""
-    #     tensor_shape = tensor.shape
-    #     expanded_shape = list(tensor_shape)
-    #     expanded_shape[dim] *= times
-    #     repeated_tensor = tensor.repeat_interleave(times, dim=dim)
-    #     return repeated_tensor.reshape(expanded_shape)
+        return images, labels
 
-#----------------------------------------------------------------------------
+#---------------
