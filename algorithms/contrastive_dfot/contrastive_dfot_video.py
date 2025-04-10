@@ -106,6 +106,10 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
                 self.cfg.diffusion.is_continuous
             ), "`torch.compile` is only verified for continuous-time diffusion models. To use it for discrete-time models, it should be tested, including # graph breaks"
 
+        n_clips = self.max_frames // self.cfg.contrastive_clip_frames
+        representation_temporal_downscale = self.cfg.contrastive_clip_frames // n_clips
+
+
         self.diffusion_model = torch.compile(
             diffusion_cls(
                 cfg=self.cfg.diffusion,
@@ -113,6 +117,7 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
                 x_shape=self.x_shape,
                 max_tokens=self.max_tokens,
                 external_cond_dim=self.external_cond_dim,
+                representation_temporal_downscale=representation_temporal_downscale
             ),
             disable=not self.cfg.compile,
         )
@@ -310,6 +315,15 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
     # ---------------------------------------------------------------------
 
     def training_diffusion_step(self, xs, masks, conditions):
+        n_frames = self.cfg.diffusion_clip_frames
+
+        # # sample xs
+        if xs.shape[1] > n_frames:
+            start_frame = np.random.randint(0, xs.shape[1] - n_frames)
+            xs = xs[:, start_frame:start_frame + n_frames, ...]
+            masks = masks[:, start_frame:start_frame + n_frames, ...]
+            conditions = conditions[:, start_frame:start_frame + n_frames, ...] if conditions is not None else None
+
         noise_levels, masks = self._get_training_noise_levels(xs, masks)
         xs_pred, loss = self.diffusion_model(
             xs,
@@ -321,35 +335,37 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
             "loss": loss,
             "xs_pred": xs_pred,
             "xs": xs,
-            "noise_levels": noise_levels
         }
 
         return output_dict
     
-    def training_contrastive_step(self, xs, augmented_xs, masks, conditions, noise_levels):
-        batch_size = xs.shape[0]
-        n_clips = xs.shape[1] // self.cfg.clip_frames
+    def training_contrastive_step(self, xs, augmented_xs, masks, conditions):
+        batch_size, n_frames = xs.shape[:2]
+        n_clips = n_frames // self.cfg.contrastive_clip_frames
 
-        dense_xs = rearrange(xs, 'b (c t) ... -> (b c) t ...', t=self.cfg.clip_frames)
-        a_dense_xs = rearrange(augmented_xs, 'b (c t) ... -> (b c) t ...', t=self.cfg.clip_frames)
-        dense_conditions = rearrange(conditions, 'b (c t) ... -> (b c) t ...', t=self.cfg.clip_frames) if conditions is not None else None
-        dense_masks = rearrange(masks, 'b (c t) ... -> (b c) t ...', t=self.cfg.clip_frames)
-        dense_noise_levels = rearrange(noise_levels, 'b (c t) -> (b c) t', t=self.cfg.clip_frames)
+        assert self.cfg.contrastive_clip_frames % n_clips == 0, f"clip_frames {self.cfg.contrastive_clip_frames} should be divisible by number of clips {n_clips}"
 
+        noise_levels, masks = self._get_training_noise_levels(xs, masks)
 
-        sparse_idx = torch.arange(0, self.cfg.clip_frames, self.frame_skip)
+        dense_xs = rearrange(xs, 'b (c t) ... -> (b c) t ...', t=self.cfg.contrastive_clip_frames)
+        a_dense_xs = rearrange(augmented_xs, 'b (c t) ... -> (b c) t ...', t=self.cfg.contrastive_clip_frames)
+        dense_conditions = rearrange(conditions, 'b (c t) ... -> (b c) t ...', t=self.cfg.contrastive_clip_frames) if conditions is not None else None
+        dense_masks = rearrange(masks, 'b (c t) ... -> (b c) t ...', t=self.cfg.contrastive_clip_frames)
+        dense_noise_levels = rearrange(noise_levels, 'b (c t) -> (b c) t', t=self.cfg.contrastive_clip_frames)
+
+        sparse_idx = torch.arange(0, n_frames, n_clips)
         sparse_xs = xs[:, sparse_idx, ...]
         a_sparse_xs = augmented_xs[:, sparse_idx, ...]
         sparse_conditions = conditions[:, sparse_idx, ...] if conditions is not None else None
         sparse_masks = masks[:, sparse_idx, ...]
         sparse_noise_levels = noise_levels[:, sparse_idx, ...] if noise_levels is not None else None
-
         sparse_rep = self.diffusion_model.forward_representation(
             torch.cat([sparse_xs, a_sparse_xs], dim=0),
             torch.cat([self._process_conditions(sparse_conditions)]*2, dim=0) if sparse_conditions is not None else None,
             k=torch.cat([sparse_noise_levels, sparse_noise_levels], dim=0),
             return_representation='s'
         )
+        sparse_rep = rearrange(sparse_rep, '(n b) c d -> n c b d', b=batch_size, n=2) # (N, clips, batch_size, dim)
 
         dense_rep = self.diffusion_model.forward_representation(
             torch.cat([dense_xs, a_dense_xs], dim=0),
@@ -359,13 +375,14 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
         )
         dense_rep = rearrange(dense_rep, '(n b c) d -> n c b d', b=batch_size, n=2) # (N, clips, batch_size, dim)
 
-        if not hasattr(self, "instance_loss"):
-            self.instance_loss = InfoNCELoss(device='cuda', batch_size=batch_size, temperature=0.1, use_cosine_similarity=False)
+        if not hasattr(self, "instance_loss") or batch_size != self.contrastive_batch_size:
+            self.contrastive_batch_size = batch_size
+            self.instance_loss = InfoNCELoss(device='cuda', batch_size=self.contrastive_batch_size, temperature=0.1, use_cosine_similarity=False)
             self.local_local_loss = InfoNCELoss(device='cuda', batch_size=n_clips, temperature=0.1, use_cosine_similarity=False)
 
         # Compute the instance-level contrastive loss
-        sparse_ic_loss = self.instance_loss(sparse_rep[:batch_size], sparse_rep[batch_size:])
-        dense_ic_loss = 0 #TODO: implement
+        sparse_ic_loss = self.instance_loss(sparse_rep[0][0], sparse_rep[1][0])
+        dense_ic_loss = 0
         for ii in range(2):
             for jj in range(2):
                 for chunk in range(n_clips):
@@ -373,21 +390,20 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
                         if (ii == jj and chunk == chunk1):
                             continue
                         dense_ic_loss += self.instance_loss(dense_rep[ii][chunk], dense_rep[jj][chunk1])
+            
+        dense_ic_loss /= 4
 
         local_loss = 0.0
         for i in range(batch_size):
             local_loss += self.local_local_loss(dense_rep[0, :, i], dense_rep[1, :, i])
 
-        # for ii in range(2):
-        #     for jj in range(2):
-        #         local_loss += global_local_temporal_contrastive()
         global_loss = 0.0
+        sparse_rep = rearrange(sparse_rep, 'n c b d -> n b c d', b=batch_size) # (N, batch_size, clips, dim)
+        dense_rep = rearrange(dense_rep, 'n c b d -> n b c d', b=batch_size) # (N, batch_size, clips, dim)
         for ii in range(2):
             for jj in range(2):
-                global_loss += global_local_temporal_contrastive(torch.stack(out_sparse[ii][1:],dim=1), torch.stack(out_dense[jj],dim=1), params.temperature)
+                global_loss += global_local_temporal_contrastive(sparse_rep[ii, :, 1:], dense_rep[jj], 0.1)
 
-
-        global_loss = 0
         loss = sparse_ic_loss + dense_ic_loss + local_loss + global_loss
 
         return loss
@@ -401,25 +417,17 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
         masks = batch["masks"]
         gt_videos = batch["gt_videos"]
 
-        # diffusion loss
-        # noise_levels, masks = self._get_training_noise_levels(xs, masks)
-        # xs_pred, loss = self.diffusion_model(
-        #     xs,
-        #     self._process_conditions(conditions),
-        #     k=noise_levels,
-        # )
-        # loss = self._reweight_loss(loss, masks)
         diffusion_output = self.training_diffusion_step(xs, masks, self._process_conditions(conditions))
 
-        noise_levels = diffusion_output["noise_levels"]
         diffusion_loss = diffusion_output["loss"]
         xs_pred = diffusion_output["xs_pred"]
 
-        c_loss = self.training_contrastive_step(xs, augmented_xs, masks, conditions, noise_levels)
-
+        if self.cfg.contrastive_loss_weight > 0:
+            c_loss = self.training_contrastive_step(xs, augmented_xs, masks, conditions)
+        else:
+            c_loss = 0
         loss = diffusion_loss + c_loss * self.cfg.contrastive_loss_weight
         
-
 
         if batch_idx % self.cfg.logging.loss_freq == 0:
             self.log(
@@ -1659,3 +1667,4 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
         assert (
             cfg.external_cond_dim == 0
         ), "External conditions are not supported yet when using VideoVAE."
+

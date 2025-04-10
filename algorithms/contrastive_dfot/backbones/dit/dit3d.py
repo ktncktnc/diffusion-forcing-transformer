@@ -9,7 +9,7 @@ from .dit_base import DiTBase
 
 
 class RepresentationProjection(nn.Module):
-    def __init__(self, in_dim: int, out_dim: int):
+    def __init__(self, in_dim: int, out_dim: int, temporal_downscale):
         super().__init__()
         self.temporal_pooling = nn.AdaptiveAvgPool3d((1,None,None))
         self.spatial_cnn = nn.Sequential(
@@ -17,12 +17,14 @@ class RepresentationProjection(nn.Module):
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1))
         )
+        self.temporal_cnn = nn.Conv3d(512, 512, kernel_size=(3,1,1), padding=(1,0,0), stride=(temporal_downscale,1,1))
         self.fc = nn.Linear(512, out_dim)
 
     def forward(self, x: torch.Tensor, b, type='s') -> torch.Tensor: 
         # x shape: ((B,T),C,H,W)
         x = self.spatial_cnn(x)
         x = rearrange(x, "(b t) c h w -> b c t h w", b=b)  # (B, C, T, H, W)
+        x = self.temporal_cnn(x)  # (B, C, T, H, W)
         grs = self.temporal_pooling(x)[:, :, 0, 0, 0]  # (B, C)
         grs = self.fc(grs)  # (B, C)
         if type == 'g':
@@ -42,6 +44,7 @@ class DiT3D(BaseBackbone):
         max_tokens: int,
         external_cond_dim: int,
         use_causal_mask=True,
+        representation_temporal_downscale: int = 2,
     ):
         if use_causal_mask:
             raise NotImplementedError(
@@ -87,7 +90,7 @@ class DiT3D(BaseBackbone):
             use_gradient_checkpointing=cfg.use_gradient_checkpointing,
         )
 
-        self.representation_proj = RepresentationProjection(hidden_size, hidden_size)
+        self.representation_proj = RepresentationProjection(hidden_size//(self.patch_size**2), hidden_size, temporal_downscale=representation_temporal_downscale)
 
         self.initialize_weights()
 
@@ -166,6 +169,8 @@ class DiT3D(BaseBackbone):
         if return_representation:
             x, h = output
             h = self.unpatchify(rearrange(h, 'b (t p) c -> (b t) p c', p=self.num_patches))
+
+            h = rearrange(h, 'a h w c -> a c h w')
             h = self.representation_proj(h, b=input_batch_size, type=return_representation)
         else:
             x = output

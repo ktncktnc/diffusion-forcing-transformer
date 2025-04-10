@@ -5,7 +5,7 @@ defaults:
   - base_video
 
 save_dir: /vast/s224075134/temporal_diffusion/FAR/datasets/ucf101
-max_frames: 24
+max_frames: 32
 context_length: 5
 frame_skip: 1
 resolution: 64

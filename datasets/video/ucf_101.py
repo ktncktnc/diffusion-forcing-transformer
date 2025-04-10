@@ -211,29 +211,32 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
     def load_video(
         self, video_metadata: Dict[str, Any], start_frame: int, end_frame: int
     ) -> torch.Tensor:
-        if self.use_video_preprocessing:
-            preprocessed_path = self.video_path_to_preprocessed_path(
-                video_metadata["video_paths"]
-            )
-            match self.cfg.video_preprocessing:
-                case "npz":
-                    video = np.load(
-                        preprocessed_path,
-                    )[
-                        "video"
-                    ][start_frame:end_frame]
-                    return torch.from_numpy(video / 255.0).float()
-                case "mp4":
-                    video = read_video(
-                        preprocessed_path,
-                        pts_unit="sec",
-                        start_pts=Fraction(start_frame, VideoPreprocessingMp4FPS),
-                        end_pts=Fraction(end_frame - 1, VideoPreprocessingMp4FPS),
-                    )
-                    return video.permute(0, 3, 1, 2) / 255.0
-        else:
-            return super().load_video(video_metadata, start_frame, end_frame)
-
+        try:
+            if self.use_video_preprocessing:
+                preprocessed_path = self.video_path_to_preprocessed_path(
+                    video_metadata["video_paths"]
+                )
+                match self.cfg.video_preprocessing:
+                    case "npz":
+                        video = np.load(
+                            preprocessed_path,
+                        )[
+                            "video"
+                        ][start_frame:end_frame]
+                        return torch.from_numpy(video / 255.0).float()
+                    case "mp4":
+                        video = read_video(
+                            preprocessed_path,
+                            pts_unit="sec",
+                            start_pts=Fraction(start_frame, VideoPreprocessingMp4FPS),
+                            end_pts=Fraction(end_frame - 1, VideoPreprocessingMp4FPS),
+                        )
+                        return video.permute(0, 3, 1, 2) / 255.0
+            else:
+                return super().load_video(video_metadata, start_frame, end_frame)
+        except Exception as e:
+            print(f"Error loading video {video_metadata['video_paths']}: {e}")
+            return None
 
 class UCF101SimpleVideoDataset(
     UCF101BaseVideoDataset, BaseSimpleVideoDataset
@@ -307,6 +310,9 @@ class UCF101AdvancedVideoDataset(
             else:
                 # load video only
                 video = self.load_video(video_metadata, start_frame, end_frame)
+
+        if video is None:
+            return None
 
         lens = [len(x) for x in (video, cond, latent) if x is not None]
         assert len(set(lens)) == 1, "video, cond, latent must have the same length"

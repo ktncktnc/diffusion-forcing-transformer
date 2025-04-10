@@ -34,6 +34,7 @@ class DiscreteDiffusion(nn.Module):
         x_shape: torch.Size,
         max_tokens: int,
         external_cond_dim: int,
+        representation_temporal_downscale: int = 2,
     ):
         super().__init__()
         self.cfg = cfg
@@ -48,6 +49,7 @@ class DiscreteDiffusion(nn.Module):
         self.loss_weighting = cfg.loss_weighting
         self.ddim_sampling_eta = cfg.ddim_sampling_eta
         self.clip_noise = cfg.clip_noise
+        self.representation_temporal_downscale = representation_temporal_downscale
 
         self.backbone_cfg = backbone_cfg
         self.use_causal_mask = cfg.use_causal_mask
@@ -74,6 +76,7 @@ class DiscreteDiffusion(nn.Module):
             max_tokens=self.max_tokens,
             external_cond_dim=self.external_cond_dim,
             use_causal_mask=self.use_causal_mask,
+            representation_temporal_downscale=self.representation_temporal_downscale
         )
 
     def _build_buffer(self):

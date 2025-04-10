@@ -32,6 +32,11 @@ class BaseDataModule(pl.LightningDataModule):
     def _dataloader(self, split: str) -> TRAIN_DATALOADERS | EVAL_DATALOADERS:
         dataset = self._build_dataset(split)
         split_cfg = self.exp_cfg[split]
+        
+        def collate_fn(batch):
+            batch = list(filter(lambda x: x is not None, batch))
+            return torch.utils.data.dataloader.default_collate(batch)
+        
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=split_cfg.batch_size,
@@ -43,7 +48,9 @@ class BaseDataModule(pl.LightningDataModule):
                 if hasattr(dataset, "worker_init_fn")
                 else None
             ),
+            collate_fn=collate_fn
         )
+
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
         return self._dataloader("training")
