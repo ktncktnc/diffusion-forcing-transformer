@@ -1,0 +1,29 @@
+defaults:
+  - base_slurm
+
+params:
+  gpus: h100:1
+  num_cpus: 8
+  memory: 32G
+  time: "120:0:0" # Acceptable time formats include "minutes", "minutes:seconds", "hours:minutes:seconds", "days-hours", "days-hours:minutes" and "days-hours:minutes:seconds".
+  email: s224075134@deakin.edu.au
+
+launch_template: |
+  #!/bin/bash
+
+  #SBATCH -J {name}
+  #SBATCH -o {log_dir}/out_%j.out
+  #SBATCH -e {log_dir}/error_%j.err
+  #SBATCH --qos=batch-short
+  #SBATCH --ntasks-per-node=1
+  #SBATCH --mail-user={email}
+  #SBATCH --mail-type=FAIL
+  #SBATCH --gres=gpu:{gpus}
+  #SBATCH --cpus-per-task={num_cpus}
+  #SBATCH --mem-per-cpu={memory}
+  #SBATCH --time={time}
+
+  source ~/.bashrc
+  cd {project_root}
+  source venv/bin/activate
+  python -m main {python_args}
