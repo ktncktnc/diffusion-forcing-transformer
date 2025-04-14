@@ -22,7 +22,7 @@ def extract(a, t, x_shape):
 
 
 ModelPrediction = namedtuple(
-    "ModelPrediction", ["pred_noise", "pred_x_start", "model_out"]
+    "ModelPrediction", ["pred_noise", "pred_x_start", "model_out", "representation"]
 )
 
 
@@ -161,7 +161,9 @@ class DiscreteDiffusion(nn.Module):
     def model_predictions(self, x, k, external_cond=None, external_cond_mask=None, return_representation=None):
         model_output = self.model(x, k, external_cond, external_cond_mask, return_representation=return_representation)
         if return_representation:
-            return model_output[1]
+            model_output, representation = model_output
+        else:
+            representation = None
 
         if self.objective == "pred_noise":
             pred_noise = torch.clamp(model_output, -self.clip_noise, self.clip_noise)
@@ -176,7 +178,7 @@ class DiscreteDiffusion(nn.Module):
             x_start = self.predict_start_from_v(x, k, v)
             pred_noise = self.predict_noise_from_v(x, k, v)
 
-        model_pred = ModelPrediction(pred_noise, x_start, model_output)
+        model_pred = ModelPrediction(pred_noise, x_start, model_output, representation)
 
         return model_pred
 
@@ -231,8 +233,7 @@ class DiscreteDiffusion(nn.Module):
 
     def q_sample(self, x_start, k, noise=None):
         if noise is None:
-            noise = torch.randn_like(x_start)
-            noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+            noise = self.sample_noise(x_start.shape, device=x_start.device)
 
         return (
             extract(self.sqrt_alphas_cumprod, k, x_start.shape) * x_start
@@ -327,17 +328,17 @@ class DiscreteDiffusion(nn.Module):
         x: torch.Tensor,
         external_cond: Optional[torch.Tensor],
         k: torch.Tensor,
+        return_representation: str=None
     ):
-        noise = torch.randn_like(x)
-        noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
-
+        noise = self.sample_noise(x.shape, device=x.device)
         noised_x = self.q_sample(x_start=x, k=k, noise=noise)
         model_pred = self.model_predictions(
-            x=noised_x, k=k, external_cond=external_cond
+            x=noised_x, k=k, external_cond=external_cond, return_representation=return_representation
         )
 
         pred = model_pred.model_out
         x_pred = model_pred.pred_x_start
+        representation = model_pred.representation
 
         if self.objective == "pred_noise":
             target = noise
@@ -354,21 +355,22 @@ class DiscreteDiffusion(nn.Module):
         loss_weight = self.add_shape_channels(loss_weight)
         loss = loss * loss_weight
 
+        if return_representation:
+            return x_pred, loss, representation
         return x_pred, loss
     
-    def forward_representation(
-        self,
-        x: torch.Tensor,
-        external_cond: Optional[torch.Tensor],
-        k: torch.Tensor, 
-        return_representation: str
-    ):
-        noise = torch.randn_like(x)
-        noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+    # def forward_representation(
+    #     self,
+    #     x: torch.Tensor,
+    #     external_cond: Optional[torch.Tensor],
+    #     k: torch.Tensor, 
+    #     return_representation: str
+    # ):
+    #     noise = self.sample_noise(x.shape, device=x.device)
 
-        noised_x = self.q_sample(x_start=x, k=k, noise=noise)
-        representation = self.model_predictions(x=noised_x, k=k, external_cond=external_cond, return_representation=return_representation)
-        return representation
+    #     noised_x = self.q_sample(x_start=x, k=k, noise=noise)
+    #     representation = self.model_predictions(x=noised_x, k=k, external_cond=external_cond, return_representation=return_representation)
+    #     return representation
         
 
     def ddim_idx_to_noise_level(self, indices: torch.Tensor):
@@ -437,10 +439,10 @@ class DiscreteDiffusion(nn.Module):
 
         noise = torch.where(
             self.add_shape_channels(clipped_curr_noise_level > 0),
-            torch.randn_like(x),
+            self.sample_noise(x.shape, device=x.device),
             0,
         )
-        noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+
         x_pred = model_mean + torch.exp(0.5 * model_log_variance) * noise
 
         # only update frames where the noise level decreases
@@ -506,7 +508,6 @@ class DiscreteDiffusion(nn.Module):
                     ),
                     model_pred.pred_x_start,
                 )
-
         else:
             model_pred = self.model_predictions(
                 x=x,
@@ -517,8 +518,7 @@ class DiscreteDiffusion(nn.Module):
             x_start = model_pred.pred_x_start
             pred_noise = model_pred.pred_noise
 
-        noise = torch.randn_like(x)
-        noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+        noise = self.sample_noise(x.shape, device=x.device)
 
         x_pred = x_start * alpha_next.sqrt() + pred_noise * c + sigma * noise
 
@@ -543,3 +543,14 @@ class DiscreteDiffusion(nn.Module):
         ] * self.alphas_cumprod[None, None] / (1 - self.alphas_cumprod[None, None])
         k = torch.argmax(ll_except_c, -1)
         return k
+
+    def sample_noise(self, x_shape, device=None, generator=None):
+        x_shape = list(x_shape)
+        if self.cfg.same_noise_on_all_frames:
+            repeat_shape = x_shape[1]
+            x_shape[1] = 1
+            noise = torch.repeat_interleave(torch.randn(x_shape, device=device, generator=generator), repeats=repeat_shape, dim=1)
+        else:
+            noise = torch.randn(x_shape, device=device, generator=generator)
+        noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+        return noise

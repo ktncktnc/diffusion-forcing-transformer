@@ -242,14 +242,18 @@ class VideoResNet(nn.Module):
             x, clip_type = x
 
             x = self.stem(x)
+            print('resnet0 x', x.shape)
 
             x = self.layer1(x)
+            print('resnet1 x', x.shape)
             x = self.layer2(x)
+            print('resnet2 x', x.shape)
             x = self.layer3(x)
+            print('resnet3 x', x.shape)
             x = self.layer4(x)
+            print('resnet4 x', x.shape)
             x = self.avgpool(x)
 
-            
             return x, clip_type
 
     def _make_layer(self, block, conv_builder, planes, blocks, stride=1):
@@ -378,13 +382,16 @@ class mlp(nn.Module):
             if clip_type == 'd':
                 # Global Dense Representation, this will be used for IC, LL and GL losses
                 # ('input x', x.shape)
+                print('x', x.shape)
                 x = self.temp_avg(x)
                 x = x.flatten(1)
+                print('flatten', x.shape)
                 # print('x flatten', x.shape)
                 
                 x = self.relu(self.bn1(self.fc1(x)))
+                print('x relu', x.shape)
                 # print('x relu', x.shape)
-
+                # exit(0)
                 x = nn.functional.normalize(self.bn2(self.fc2(x)), p=2, dim=1)
                 return x
             
@@ -398,6 +405,7 @@ class mlp(nn.Module):
                 print('gsr relu', gsr.shape)
                 gsr = nn.functional.normalize(self.bn2(self.fc2(gsr)), p=2, dim=1)
                 print('gsr', gsr.shape)
+                print('x before', x.shape)
                 # Local Sparse Representations, These will be used for the GL losses
                 x1, x2, x3, x4 = [nn.functional.normalize(self.bn2(self.fc2(\
                                     self.relu(self.bn1(self.fc1(x[:,:,i,:,:].flatten(1))))))) for i in range(4)]
@@ -435,24 +443,26 @@ if __name__ == '__main__':
     model.eval()
     model.cuda()
 
-    sparse_clip = torch.randn(5, 3, 15, 64, 64).to('cuda')
-    dense_clip0 = torch.randn(5, 3, 17, 64, 64).to('cuda')
-    dense_clip1 = torch.randn(5, 3, 17, 64, 64).to('cuda')
-    dense_clip2 = torch.randn(5, 3, 17, 64, 64).to('cuda')
-    dense_clip3 = torch.randn(5, 3, 17, 64, 64).to('cuda')
-    a_sparse_clip = torch.randn(5, 3, 19, 64, 64).to('cuda')
-    a_dense_clip0 = torch.randn(5, 3, 17, 64, 64).to('cuda')
-    a_dense_clip1 = torch.randn(5, 3, 17, 64, 64).to('cuda')
-    a_dense_clip2 = torch.randn(5, 3, 17, 64, 64).to('cuda')
-    a_dense_clip3 = torch.randn(5, 3, 17, 64, 64).to('cuda')
+    sparse_clip = torch.randn(7, 3, 16, 128, 128).to('cuda')
+    dense_clip0 = torch.randn(7, 3, 16, 128, 128).to('cuda')
+    dense_clip1 = torch.randn(7, 3, 16, 128, 128).to('cuda')
+    dense_clip2 = torch.randn(7, 3, 16, 128, 128).to('cuda')
+    dense_clip3 = torch.randn(7, 3, 16, 128, 128).to('cuda')
+    a_sparse_clip = torch.randn(7, 3, 16, 128, 128).to('cuda')
+    a_dense_clip0 = torch.randn(7, 3, 16, 128, 128).to('cuda')
+    a_dense_clip1 = torch.randn(7, 3, 16, 128, 128).to('cuda')
+    a_dense_clip2 = torch.randn(7, 3, 16, 128, 128).to('cuda')
+    a_dense_clip3 = torch.randn(7, 3, 16, 128, 128).to('cuda')
     
     out_sparse = []
     # out_dense will have output in this order : [d0,d1,d2,d3,a_d0,...]
     out_dense = [[],[]]
 
     out_sparse.append(model((sparse_clip.cuda(),'s'))) # (5, 128)
-    exit(0)
     out_sparse.append(model((a_sparse_clip.cuda(),'s')))
+    print('out_sparse[0][0]', out_sparse[0][0].shape)
+    print('out_sparse[1][0]', out_sparse[1][0].shape)
+    exit(0)
 
     out_dense[0].append(model((dense_clip0.cuda(),'d')))
     out_dense[0].append(model((dense_clip1.cuda(),'d')))
@@ -467,12 +477,15 @@ if __name__ == '__main__':
     criterion = InfoNCELoss(device = 'cuda', batch_size=out_sparse[0][0].shape[0], temperature=0.1, use_cosine_similarity = False).cuda()
     criterion_local_local = InfoNCELoss(device = 'cuda', batch_size=4, temperature=0.1, use_cosine_similarity = False).cuda()
 
-    print('out_sparse[0][0]', out_sparse[0][0].shape)
-    print('out_sparse[1][0]', out_sparse[1][0].shape)
+
 
     print('torch.stack(out_dense[0],dim=1)[ii],', torch.stack(out_dense[0],dim=1).shape)
 
-    print('model((sparse_clip.cuda(),"s"))', model((sparse_clip.cuda(),'s')).shape)
+    # print('model((sparse_clip.cuda(),"s"))', model((sparse_clip.cuda(),'s')).shape)
     print('torch.stack(out_sparse[ii][1:],dim=1)', torch.stack(out_sparse[0][1:],dim=1).shape)
     print('torch.stack(out_sparse[ii][0:],dim=1)', torch.stack(out_sparse[0][0:],dim=1).shape)
     print('torch.stack(out_dense[jj],dim=1)', torch.stack(out_dense[0],dim=1).shape)
+
+
+    # out_sparse[0]: (B, N_clips+1, d)
+    # out_dense[0]: (B, N_clips+1, d)

@@ -6,7 +6,7 @@ defaults:
 
 latent:
   suffix: 1cd9pgpb
-save_dir: data/minecraft
+save_dir: /weka/s224075134/temporal_diffusion/datasets/video/minecraft
 max_frames: 50
 frame_skip: 2
 external_cond_stack: true

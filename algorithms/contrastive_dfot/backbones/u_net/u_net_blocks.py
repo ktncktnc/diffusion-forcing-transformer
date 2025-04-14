@@ -160,7 +160,6 @@ class Attention(nn.Module):
             else self.cpu_backends
         )
         q, k, v = map(lambda t: t.contiguous(), (q, k, v))
-
         with sdpa_kernel(backends=backends):
             # pylint: disable=E1102
             hidden_states = F.scaled_dot_product_attention(

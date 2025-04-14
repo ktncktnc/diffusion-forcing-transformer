@@ -3,6 +3,8 @@ from functools import partial
 from omegaconf import DictConfig
 import numpy as np
 import torch
+from pathlib import Path
+import hydra
 import torch.distributed
 import torch.nn.functional as F
 from torch import Tensor
@@ -24,6 +26,7 @@ from .diffusion import (
     DiscreteDiffusion,
     ContinuousDiffusion,
 )
+import os
 from .history_guidance import HistoryGuidance
 from .losses import InfoNCELoss, global_local_temporal_contrastive
 
@@ -110,7 +113,7 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
         representation_temporal_downscale = self.cfg.contrastive_clip_frames // n_clips
 
 
-        self.diffusion_model = torch.compile(
+        self.diffusion_model: DiscreteDiffusion = torch.compile(
             diffusion_cls(
                 cfg=self.cfg.diffusion,
                 backbone_cfg=self.cfg.backbone,
@@ -314,7 +317,7 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
     # Training
     # ---------------------------------------------------------------------
 
-    def training_diffusion_step(self, xs, masks, conditions):
+    def training_diffusion_step(self, xs, masks, conditions, batch_idx):
         n_frames = self.cfg.diffusion_clip_frames
 
         # # sample xs
@@ -325,11 +328,29 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
             conditions = conditions[:, start_frame:start_frame + n_frames, ...] if conditions is not None else None
 
         noise_levels, masks = self._get_training_noise_levels(xs, masks)
-        xs_pred, loss = self.diffusion_model(
+
+        model_output = self.diffusion_model(
             xs,
             self._process_conditions(conditions),
             k=noise_levels,
+            return_representation='raw' if self.cfg.save_representation else None,
         )
+        xs_pred, loss = model_output[:2]
+        if self.cfg.save_representation and self.trainer.state.fn != "FIT":
+            representation = model_output[2]
+            output_dir = Path(os.path.join(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir, "representations"))
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
+        
+            torch.save({
+                'xs': xs,
+                'xs_pred': xs_pred,
+                'representation': representation,
+                'noise_levels': noise_levels,
+                'masks': masks,
+                'conditions': conditions,
+            }, os.path.join(output_dir, f"representation_{batch_idx}.pt"))
+        
         loss = self._reweight_loss(loss, masks)
         output_dict = {
             "loss": loss,
@@ -359,20 +380,21 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
         sparse_conditions = conditions[:, sparse_idx, ...] if conditions is not None else None
         sparse_masks = masks[:, sparse_idx, ...]
         sparse_noise_levels = noise_levels[:, sparse_idx, ...] if noise_levels is not None else None
-        sparse_rep = self.diffusion_model.forward_representation(
+
+        sparse_rep = self.diffusion_model(
             torch.cat([sparse_xs, a_sparse_xs], dim=0),
             torch.cat([self._process_conditions(sparse_conditions)]*2, dim=0) if sparse_conditions is not None else None,
             k=torch.cat([sparse_noise_levels, sparse_noise_levels], dim=0),
             return_representation='s'
-        )
+        )[-1]
         sparse_rep = rearrange(sparse_rep, '(n b) c d -> n c b d', b=batch_size, n=2) # (N, clips, batch_size, dim)
 
-        dense_rep = self.diffusion_model.forward_representation(
+        dense_rep = self.diffusion_model(
             torch.cat([dense_xs, a_dense_xs], dim=0),
             torch.cat([self._process_conditions(dense_conditions)]*2, dim=0) if dense_conditions is not None else None,
             k=torch.cat([dense_noise_levels, dense_noise_levels], dim=0),
             return_representation='g'
-        )
+        )[-1]
         dense_rep = rearrange(dense_rep, '(n b c) d -> n c b d', b=batch_size, n=2) # (N, clips, batch_size, dim)
 
         if not hasattr(self, "instance_loss") or batch_size != self.contrastive_batch_size:
@@ -417,12 +439,12 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
         masks = batch["masks"]
         gt_videos = batch["gt_videos"]
 
-        diffusion_output = self.training_diffusion_step(xs, masks, self._process_conditions(conditions))
+        diffusion_output = self.training_diffusion_step(xs, masks, self._process_conditions(conditions), batch_idx)
 
         diffusion_loss = diffusion_output["loss"]
         xs_pred = diffusion_output["xs_pred"]
 
-        if self.cfg.contrastive_loss_weight > 0:
+        if self.cfg.contrastive_loss_weight > 0 and self.trainer.state.fn == "FIT":
             c_loss = self.training_contrastive_step(xs, augmented_xs, masks, conditions)
         else:
             c_loss = 0
@@ -476,13 +498,13 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
     # ---------------------------------------------------------------------
 
     @torch.no_grad()
-    def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
+    def validation_step(self, batch, batch_idx, namespace="validation", **kwargs) -> STEP_OUTPUT:
         """Validation step"""
         # 1. If running validation while training a model, directly evaluate
         # the denoising performance to detect overfitting, etc.
         # Logs the "denoising_vis" visualization as well as "validation/loss" metric.
-        if self.trainer.state.fn == "FIT":
-            self._eval_denoising(batch, batch_idx, namespace=namespace)
+        # if self.trainer.state.fn == "FIT":
+        self._eval_denoising(batch, batch_idx, namespace=namespace)
 
         # 2. Sample all videos (based on the specified tasks)
         # and log the generated videos and metrics.
@@ -602,7 +624,13 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
     def _sample_all_videos(
         self, batch, batch_idx, namespace="validation"
     ) -> Optional[Dict[str, Tensor]]:
-        xs, conditions, *_, gt_videos = batch
+        # xs, conditions, *_, gt_videos = batch
+        xs = batch["xs"]
+        # augmented_xs = batch["augmented_xs"]
+        conditions = batch["conditions"]
+        masks = batch["masks"]
+        gt_videos = batch["gt_videos"]
+        
         all_videos: Dict[str, Tensor] = {"gt": xs}
 
         for task in self.tasks:
@@ -1181,7 +1209,7 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
             if record is not None:
                 raise ValueError("return_all is not supported if using sliding window.")
             # actual context depends on whether it's during sliding window or not
-            # corner case at the beginning
+            # corner case at the beginning: end of context
             c = min(sliding_context_len, curr_token)
             # try biggest prediction chunk size
             h = min(length - curr_token, self.max_tokens - c)
@@ -1318,12 +1346,7 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
         horizon = length if self.use_causal_mask else self.max_tokens
         padding = horizon - length
         # create initial xs_pred with noise
-        xs_pred = torch.randn(
-            (batch_size, horizon, *x_shape),
-            device=self.device,
-            generator=self.generator,
-        )
-        xs_pred = torch.clamp(xs_pred, -self.clip_noise, self.clip_noise)
+        xs_pred = self.diffusion_model.sample_noise((batch_size, horizon, *x_shape), device=self.device, generator=self.generator)
 
         if context is None:
             # create empty context and zero context mask
@@ -1379,7 +1402,6 @@ class ContrastiveDFoTVideo(BasePytorchAlgo):
                 desc="Sampling with DFoT",
                 leave=False,
             )
-
         for m in range(scheduling_matrix.shape[0] - 1):
             from_noise_levels = scheduling_matrix[m]
             to_noise_levels = scheduling_matrix[m + 1]

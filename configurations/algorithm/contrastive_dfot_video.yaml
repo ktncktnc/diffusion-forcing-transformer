@@ -59,6 +59,7 @@ diffusion:
   ddim_sampling_eta: 0.0
   # (For full sequence diffusion)
   reconstruction_guidance: 0.0
+  same_noise_on_all_frames: False
 
 # vae
 vae:
@@ -103,3 +104,8 @@ logging:
   metrics_batch_size: 16
   sanity_generation: False # generate video samples during sanity check
   raw_dir: null
+
+
+# experiment config
+save_representation: False
+representation_dir: ${output_dir}/representations

@@ -8,6 +8,7 @@ and the `LICENSE` file to credit the author.
 from typing import Literal, Optional, Tuple
 import string
 import random
+import os
 from pathlib import Path
 from omegaconf import DictConfig
 import wandb
@@ -148,7 +149,7 @@ def download_vae_checkpoints(
 
     for path in wandb_pretrained_paths:
         print(cyan("Downloading pretrained VAE from Wandb:"), path)
-        download_checkpoint(path, Path("outputs/downloaded"), option="best")
+        download_checkpoint(path, Path(os.path.join(cfg.output_dir, 'downloaded')), option="best")
 
     for path in hf_pretrained_paths:
         print(cyan("Downloading pretrained VAE from Hugging Face:"), path)
@@ -156,4 +157,4 @@ def download_vae_checkpoints(
 
 
 def wandb_to_local_path(run_path: str) -> Path:
-    return Path("outputs/downloaded") / run_path / "model.ckpt"
+    return Path(Path(os.path.join(cfg.output_dir, 'downloaded'))) / run_path / "model.ckpt"

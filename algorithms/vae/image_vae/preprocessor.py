@@ -44,6 +44,15 @@ class ImageVAEPreprocessor(BasePytorchAlgo):
     def validation_step(self, batch, batch_idx, dataloader_idx=0) -> STEP_OUTPUT:
         videos, latent_paths = batch
         latent_paths = [Path(path) for path in latent_paths]
+        all_done = True
+        for latent_path in latent_paths:
+            if not latent_path.exists():
+                all_done = False
+                break
+        if all_done:
+            print(f"Latent already exists for {latent_paths}. Skipping.")
+            return None
+        
         batch_size = videos.shape[0]
         videos = self._rearrange_and_normalize(videos)
 
@@ -53,7 +62,7 @@ class ImageVAEPreprocessor(BasePytorchAlgo):
         latents = latent_dist.sample().to(torch.float16)
 
         # just to see the progress in wandb
-        if batch_idx % 100 == 0:
+        if batch_idx % 1000 == 0:
             self.log("dummy", 0.0)
 
         # log gt vs reconstructed video to wandb

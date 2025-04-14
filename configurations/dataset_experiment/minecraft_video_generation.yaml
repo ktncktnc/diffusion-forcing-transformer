@@ -10,12 +10,13 @@ dataset:
     enable: True
   subdataset_size: 1920000
   num_eval_videos: 768
+  max_frames: 50
 
 algorithm:
   lr_scheduler:
     name: constant_with_warmup
     num_warmup_steps: 10000
-    num_training_steps: 200000
+    num_training_steps: c
   weight_decay: 0.001
   compile: true_without_ddp_optimizer
   diffusion:
@@ -38,6 +39,10 @@ algorithm:
     batch_size: 2
   logging:
     max_num_videos: 32
+
+  contrastive_clip_frames: 8
+  diffusion_clip_frames: 50
+  contrastive_loss_weight: 0.3
 
 experiment:
   training:

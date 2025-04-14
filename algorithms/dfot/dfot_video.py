@@ -1174,6 +1174,13 @@ class DFoTVideo(BasePytorchAlgo):
         horizon = length if self.use_causal_mask else self.max_tokens
         padding = horizon - length
         # create initial xs_pred with noise
+        # xs_pred = torch.randn(
+        #     (batch_size, 1, *x_shape),
+        #     device=self.device,
+        #     generator=self.generator,
+        # )
+        # xs_pred = torch.repeat_interleave(
+        #     xs_pred, horizon, dim=1)
         xs_pred = torch.randn(
             (batch_size, horizon, *x_shape),
             device=self.device,
