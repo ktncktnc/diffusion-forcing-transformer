@@ -4,7 +4,7 @@
 defaults:
   - base_video
 
-save_dir: /vast/s224075134/temporal_diffusion/FAR/datasets/ucf101
+save_dir: /weka/s224075134/temporal_diffusion/datasets/video/ucf101
 max_frames: 32
 context_length: 5
 frame_skip: 1
@@ -16,16 +16,16 @@ video_preprocessing: mp4
 num_eval_videos: 6144
 augmentation:
   p: 1.0
-  xflip: 0.0
-  yflip: 1.0
-  rotate_int: 0
-  translate_int: 0
-  scale: 0.5
-  contrast: 0.5
-  brightness: 0.5
+  xflip: 0.5
+  yflip: 0.5
+  rotate_int: 0.5
+  translate_int: 0.5
+  scale: 0.3
+  contrast: 0.125
+  brightness: 0.3
   lumaflip: 0.5
-  hue: 0.5
-  saturation: 0.5
+  hue: 0.3
+  saturation: 0.3
 
 
 # num_eval_videos: 6144

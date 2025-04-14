@@ -92,6 +92,11 @@ def run_local(cfg: DictConfig):
             for k, v in OmegaConf.to_container(cfg.wandb, resolve=True).items()
             if k != "mode"
         }
+        tags = [cfg.experiment._name, cfg.dataset._name, cfg.algorithm._name] + cfg.experiment.tasks\
+        # add cfg.algorithm.backbone.name if it exists
+        if hasattr(cfg.algorithm, "backbone") and hasattr(cfg.algorithm.backbone, "name"):
+            tags.append(cfg.algorithm.backbone.name)
+        
         logger = logger_cls(
             name=name,
             save_dir=str(output_dir),
@@ -99,6 +104,7 @@ def run_local(cfg: DictConfig):
             log_model="all" if not offline else False,
             config=OmegaConf.to_container(cfg),
             id=resume or requeue,
+            tags=tags,
             **wandb_kwargs,
         )
     else:
@@ -111,7 +117,7 @@ def run_local(cfg: DictConfig):
             print(cyan(f"Resuming from requeued run: {requeue}"))
             download_checkpoint(
                 f"{cfg.wandb.entity}/{cfg.wandb.project}/{requeue}",
-                Path("outputs/downloaded"),
+                Path(os.path.join(cfg.output_dir, 'downloaded')),
                 "latest",
             )
         resume = requeue
@@ -254,7 +260,7 @@ def run(cfg: DictConfig):
     if not "skip_download" in cfg:
         if load_id and "_on_compute_node" not in cfg:
             run_path = f"{cfg.wandb.entity}/{cfg.wandb.project}/{load_id}"
-            download_checkpoint(run_path, Path("outputs/downloaded"), option=option)
+            download_checkpoint(run_path, Path(os.path.join(cfg.output_dir, 'downloaded')), option=option)
         if "_on_compute_node" not in cfg and is_rank_zero:
             download_vae_checkpoints(cfg)
         if load and is_hf_path(load) and "_on_compute_node" not in cfg:

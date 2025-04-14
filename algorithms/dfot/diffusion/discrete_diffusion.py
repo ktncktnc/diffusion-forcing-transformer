@@ -498,6 +498,7 @@ class DiscreteDiffusion(nn.Module):
             pred_noise = model_pred.pred_noise
 
         noise = torch.randn_like(x)
+        # noise = torch.repeat_interleave(torch.randn_like(x[:, :1, ...]), repeats=x.shape[1], dim=1)
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
 
         x_pred = x_start * alpha_next.sqrt() + pred_noise * c + sigma * noise

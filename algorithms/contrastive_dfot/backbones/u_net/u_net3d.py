@@ -30,6 +30,7 @@ class Unet3D(BaseBackbone):
         max_tokens: int,
         external_cond_dim: int,
         use_causal_mask=True,
+        **kwargs
     ):
         super().__init__(
             cfg,
@@ -165,7 +166,7 @@ class Unet3D(BaseBackbone):
             curr_resolution //= 2 if not is_last else 1
 
         self.out = nn.Sequential(block_klass(dim * 2, dim), nn.Conv3d(dim, out_dim, 1))
-        self.contrastive_projection = nn.Sequential(block_klass(dim * 2, dim), nn.Conv3d(dim, out_dim, 1))
+        self.contrastive_projection = nn.Sequential(block_klass(dim * 2, dim), nn.Conv3d(dim, 128, 1))
 
     @property
     def noise_level_emb_dim(self):
@@ -217,7 +218,8 @@ class Unet3D(BaseBackbone):
         x = rearrange(x, " b c t h w -> b t c h w")
         
         if return_representation:
-            h = self.contrastive_projection(h_out)
+            if return_representation != 'raw':
+                h = self.contrastive_projection(h_out)
             h = rearrange(h, " b c t h w -> b t c h w")
             return x, h
         else:

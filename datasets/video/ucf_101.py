@@ -51,25 +51,29 @@ def _preprocess_video(
     preprocessing_type: VideoPreprocessingType = "npz",
 ):
     try:
-        video = read_video(str(video_path))
-        video = rescale_and_crop(video, resolution)
-        video_path = (
+        preprocessed_video_path = (
             video_path.parent.parent.parent
             / f"preprocessed_{resolution}_{preprocessing_type}"
             / video_path.parent.name
             / video_path.name
         )
+        if preprocessed_video_path.exists():
+            return
+        
+        video = read_video(str(video_path))
+        video = rescale_and_crop(video, resolution)
         # create directory if it doesn't exist
         video_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if preprocessing_type == "npz":
+        if preprocessing_type == "npz":               
             np.savez_compressed(
-                video_path,
+                preprocessed_video_path,
                 video=video.transpose(0, 3, 1, 2).copy(),
             )
-        elif preprocessing_type == "mp4":
+        elif preprocessing_type == "mp4":            
+            # write video
             write_video(
-                filename=video_path,
+                filename=preprocessed_video_path,
                 video_array=torch.from_numpy(video).clone(),
                 fps=VideoPreprocessingMp4FPS,
             )
@@ -201,12 +205,13 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
         )
 
     def video_path_to_preprocessed_path(self, video_path: Path) -> Path:
-        return (
+        a = (
             video_path.parent.parent.parent
             / f"preprocessed_{self.resolution}_{self.cfg.video_preprocessing}"
             / video_path.parent.name
             / video_path.name
         )
+        return a
 
     def load_video(
         self, video_metadata: Dict[str, Any], start_frame: int, end_frame: int
@@ -277,9 +282,7 @@ class UCF101AdvancedVideoDataset(
 
     def _augment(self, video: torch.Tensor) -> torch.Tensor:
         # augment video
-        # print('video.shape', video.shape)
         video, label = self.augment_pipe(video)
-        # print('label', label)
         return video
 
     def load_cond(

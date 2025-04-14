@@ -11,6 +11,8 @@ def build_clip():
             num_frames = 16
             sr_ratio = 4
             min_temporal_span_sparse = num_frames*sr_ratio
+            print('frame_count:', frame_count)
+            print('min_temporal_span_sparse:', min_temporal_span_sparse)
             if frame_count > min_temporal_span_sparse:
                 start_frame = np.random.randint(0,frame_count-min_temporal_span_sparse)
                 

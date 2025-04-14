@@ -99,8 +99,9 @@ class ContinuousDiffusion(DiscreteDiffusion):
         x_shape: torch.Size,
         max_tokens: int,
         external_cond_dim: int,
+        representation_temporal_downscale: int = 2,
     ):
-        super().__init__(cfg, backbone_cfg, x_shape, max_tokens, external_cond_dim)
+        super().__init__(cfg, backbone_cfg, x_shape, max_tokens, external_cond_dim, representation_temporal_downscale)
         assert (
             self.objective == "pred_v" and self.loss_weighting.strategy == "sigmoid"
         ), "ContinuousDiffusion only supports 'pred_v' objective and 'sigmoid' loss weighting"
@@ -113,10 +114,21 @@ class ContinuousDiffusion(DiscreteDiffusion):
             self.cfg.training_schedule
         )
 
-    def model_predictions(self, x, k, external_cond=None, external_cond_mask=None):
+    def model_predictions(
+            self, 
+            x, 
+            k, 
+            external_cond=None, 
+            external_cond_mask=None,
+            return_representation: str=None    
+        ):
         model_output = self.model(
-            x, self.precond_scale * self.logsnr[k], external_cond, external_cond_mask
+            x, self.precond_scale * self.logsnr[k], external_cond, external_cond_mask, return_representation=return_representation
         )
+        if return_representation:
+            model_output, representation = model_output
+        else:
+            representation = None
 
         if self.objective == "pred_noise":
             pred_noise = torch.clamp(model_output, -self.clip_noise, self.clip_noise)
@@ -131,7 +143,7 @@ class ContinuousDiffusion(DiscreteDiffusion):
             x_start = self.predict_start_from_v(x, k, v)
             pred_noise = self.predict_noise_from_v(x, k, v)
 
-        model_pred = ModelPrediction(pred_noise, x_start, model_output)
+        model_pred = ModelPrediction(pred_noise, x_start, model_output, representation)
 
         return model_pred
 
@@ -140,6 +152,7 @@ class ContinuousDiffusion(DiscreteDiffusion):
         x: torch.Tensor,
         external_cond: Optional[torch.Tensor],
         k: torch.Tensor,
+        return_representation: str = None,
     ):
         logsnr = self.training_schedule(k)
         noise = torch.randn_like(x)
@@ -149,7 +162,13 @@ class ContinuousDiffusion(DiscreteDiffusion):
         x_t = alpha_t * x + sigma_t * noise
 
         # v-prediction
-        v_pred = self.model(x_t, self.precond_scale * logsnr, external_cond)
+        v_pred = self.model(x_t, self.precond_scale * logsnr, external_cond, return_representation=return_representation)
+
+        if return_representation:
+            v_pred, representation = v_pred
+        else:
+            representation = None
+
         noise_pred = alpha_t * v_pred + sigma_t * x_t
         x_pred = alpha_t * x_t - sigma_t * v_pred
 
@@ -162,20 +181,23 @@ class ContinuousDiffusion(DiscreteDiffusion):
         loss_weight = self.add_shape_channels(loss_weight)
         loss = loss * loss_weight
 
+        if return_representation:
+            return x_pred, loss, representation
+        
         return x_pred, loss
 
-    def forward_representation(
-        self,
-        x: torch.Tensor,
-        external_cond: Optional[torch.Tensor],
-        k: torch.Tensor, 
-    ):
-        logsnr = self.training_schedule(k)
-        noise = torch.randn_like(x)
-        noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
-        alpha_t = self.add_shape_channels(torch.sigmoid(logsnr).sqrt())
-        sigma_t = self.add_shape_channels(torch.sigmoid(-logsnr).sqrt())
-        x_t = alpha_t * x + sigma_t * noise
+    # def forward_representation(
+    #     self,
+    #     x: torch.Tensor,
+    #     external_cond: Optional[torch.Tensor],
+    #     k: torch.Tensor, 
+    # ):
+    #     logsnr = self.training_schedule(k)
+    #     noise = torch.randn_like(x)
+    #     noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+    #     alpha_t = self.add_shape_channels(torch.sigmoid(logsnr).sqrt())
+    #     sigma_t = self.add_shape_channels(torch.sigmoid(-logsnr).sqrt())
+    #     x_t = alpha_t * x + sigma_t * noise
 
-        pred = self.model(x_t, self.precond_scale * logsnr, external_cond, return_representation=True)
-        return pred[1]
+    #     pred = self.model(x_t, self.precond_scale * logsnr, external_cond, return_representation=True)
+    #     return pred[1]

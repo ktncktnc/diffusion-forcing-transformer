@@ -171,7 +171,11 @@ class DiT3D(BaseBackbone):
             h = self.unpatchify(rearrange(h, 'b (t p) c -> (b t) p c', p=self.num_patches))
 
             h = rearrange(h, 'a h w c -> a c h w')
-            h = self.representation_proj(h, b=input_batch_size, type=return_representation)
+
+            if return_representation == 'raw':
+                h = rearrange(h, '(b t) c h w -> b t c h w', b=input_batch_size)
+            else:
+                h = self.representation_proj(h, b=input_batch_size, type=return_representation)
         else:
             x = output
         

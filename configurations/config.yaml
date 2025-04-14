@@ -13,5 +13,10 @@ wandb:
   project: dfot # wandb project name; if not provided, defaults to root folder name [fixme]
   mode: online # set wandb logging to online, offline or dryrun
 
+output_dir: /weka/s224075134/temporal_diffusion/diffusion-forcing-transformer/outputs
 resume: null # wandb run id to resume logging and loading checkpoint from
 load: null # wanmdb run id containing checkpoint or a path to a checkpoint file 
+
+hydra:
+  run:
+    dir: ${output_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S} # output directory for the current run

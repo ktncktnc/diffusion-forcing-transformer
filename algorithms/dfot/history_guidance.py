@@ -600,6 +600,7 @@ class HistoryGuidance:
 
     def __init__(
         self,
+        output_dir: str,
         hist_segments: List[HistorySegment],
         hist_weights: List[float],
         gen_segments: Optional[List[List[int] | ALLType]] = None,
@@ -619,6 +620,7 @@ class HistoryGuidance:
             len(hist_segments), disabled=not visualize
         )
         self._check_attributes()
+        self.output_dir = output_dir
 
     def _check_attributes(self):
         """Check if the attributes are valid."""
@@ -659,9 +661,9 @@ class HistoryGuidance:
             return
         gif = self.visualizer.to_gif()
         if logger is None:
-            path = f"outputs/history_guidance/{uuid.uuid4()}.gif"
-            if not os.path.exists("outputs/history_guidance"):
-                os.makedirs("outputs/history_guidance")
+            path = f"{self.output_dir}/history_guidance/{uuid.uuid4()}.gif"
+            if not os.path.exists(f"{self.output_dir}/history_guidance"):
+                os.makedirs(f"{self.output_dir}/history_guidance")
             with open(path, "wb") as f:
                 f.write(gif.read())
             print(cyan("\nView the history guidance visualization at:") + f"{path}")
@@ -670,7 +672,7 @@ class HistoryGuidance:
 
     @classmethod
     def from_config(
-        cls, config: DictConfig, timesteps: int = 1000
+        cls, output_dir: str, config: DictConfig, timesteps: int = 1000
     ) -> "HistoryGuidance":
         """
         Initialize the history guidance from a configuration.
@@ -680,7 +682,7 @@ class HistoryGuidance:
         """
         config = OmegaConf.to_container(config, resolve=True)
         name = config.pop("name")
-        return getattr(cls, name)(**config, timesteps=timesteps)
+        return getattr(cls, name)(**config, output_dir=output_dir, timesteps=timesteps)
 
     # -----Existing sampling techniques as special cases of history guidance-----
 
