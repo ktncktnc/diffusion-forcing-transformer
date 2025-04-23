@@ -5,6 +5,7 @@ Adapted from https://github.com/pytorch/vision/blob/main/torchvision/datasets/ki
 from typing import Any, Dict, List, Optional, Literal
 from fractions import Fraction
 import csv
+from tqdm.contrib.concurrent import process_map
 import os
 import random
 from os import path
@@ -57,9 +58,10 @@ def _preprocess_video(
             / video_path.parent.name
             / video_path.name
         )
-        if preprocessed_video_path.exists():
-            return
         
+        if preprocessed_video_path.exists():
+            # print(f"Preprocessed video already exists: {preprocessed_video_path}")
+            return
         video = read_video(str(video_path))
         video = rescale_and_crop(video, resolution)
         # create directory if it doesn't exist
@@ -70,11 +72,11 @@ def _preprocess_video(
                 preprocessed_video_path,
                 video=video.transpose(0, 3, 1, 2).copy(),
             )
-        elif preprocessing_type == "mp4":            
+        elif preprocessing_type == "mp4":
             # write video
             write_video(
                 filename=preprocessed_video_path,
-                video_array=torch.from_numpy(video).clone(),
+                video_array=torch.from_numpy(video),
                 fps=VideoPreprocessingMp4FPS,
             )
 
@@ -142,13 +144,13 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
 
     def setup(self) -> None:
         if self.use_video_preprocessing:
-            if not (
-                self.save_dir
-                / f"preprocessed_{self.resolution}_{self.cfg.video_preprocessing}"
-            ).exists():
-                for split in ["training", "validation", "test"]:
-                    print(f'Preprocessing videos for {split}...')
-                    self._preprocess_videos(split)
+            # if not (
+            #     self.save_dir
+            #     / f"preprocessed_{self.resolution}_{self.cfg.video_preprocessing}"
+            # ).exists():
+            for split in ["training", "validation", "test"]:
+                print(f'Preprocessing videos for {split}...')
+                self._preprocess_videos(split)
             self.metadata = self.exclude_failed_videos(self.metadata)
             self.transform = lambda x: x
 
@@ -172,14 +174,20 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
             resolution=self.resolution,
             preprocessing_type=self.cfg.video_preprocessing
         )
-        with Pool(32) as pool:
-            list(
-                tqdm(
-                    pool.imap(preprocess_fn, video_paths),
-                    total=len(video_paths),
-                    desc=f"Preprocessing {split} videos",
-                )
-            )
+        with Pool(8) as pool, tqdm(total=len(video_paths), desc=f"Preprocessing {split} videos") as pbar:
+            for result in pool.imap(preprocess_fn, video_paths):
+                pbar.update()
+                pbar.refresh()
+
+        print('Done!')
+
+            # list(
+            #     tqdm(
+            #         pool.imap(preprocess_fn, video_paths),
+            #         total=len(video_paths),
+            #         ,
+            #     )
+            # )
 
     def exclude_failed_videos(
         self, metadata: List[Dict[str, Any]]
@@ -214,9 +222,12 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
         return a
 
     def load_video(
-        self, video_metadata: Dict[str, Any], start_frame: int, end_frame: int
+        self, video_metadata: Dict[str, Any], start_frame: int, end_frame: int=None
     ) -> torch.Tensor:
         try:
+            if end_frame is None:
+                end_frame = self.video_length(video_metadata)
+                
             if self.use_video_preprocessing:
                 preprocessed_path = self.video_path_to_preprocessed_path(
                     video_metadata["video_paths"]
@@ -247,7 +258,7 @@ class UCF101SimpleVideoDataset(
     UCF101BaseVideoDataset, BaseSimpleVideoDataset
 ):
     """
-    Kinetics-600 simple video dataset
+    UCF-101 simple video dataset
     """
 
     def __init__(self, cfg: DictConfig, split: SPLIT = "training"):

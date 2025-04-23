@@ -32,9 +32,49 @@ class BaseDataModule(pl.LightningDataModule):
     def _dataloader(self, split: str) -> TRAIN_DATALOADERS | EVAL_DATALOADERS:
         dataset = self._build_dataset(split)
         split_cfg = self.exp_cfg[split]
+
+        def pad_tensor(vec, pad, dim):
+            """
+            args:
+                vec - tensor to pad
+                pad - the size to pad to
+                dim - dimension to pad
+
+            return:
+                a new tensor padded to 'pad' in dimension 'dim'
+            """
+            pad_size = list(vec.shape)
+            pad_size[dim] = pad - vec.size(dim)
+            return torch.cat([vec, torch.zeros(*pad_size)], dim=dim)
         
         def collate_fn(batch):
+            # filter out None values
             batch = list(filter(lambda x: x is not None, batch))
+
+            # pad the batch to the same length
+            if isinstance(batch[0], dict):
+                max_len = max(sample['videos'].shape[0] for sample in batch)
+                keys = batch[0].keys()
+                new_batch = []
+                for sample in batch:
+                    for key in keys:
+                        if isinstance(sample[key], torch.Tensor):
+                            sample[key] = pad_tensor(sample[key], max_len, 0)
+                    new_batch.append(sample)
+                batch = new_batch
+            elif isinstance(batch[0], tuple):
+                max_len = max(len(sample[0].shape[0]) for sample in batch)
+                new_batch = []
+                for sample in batch:
+                    pad_len = max_len - len(sample)
+                    new_sample = []
+                    for i, item in enumerate(sample):
+                        if isinstance(item, torch.Tensor):
+                            item = pad_tensor(item, max_len, 0)
+                        new_sample.append(item)
+                    new_batch.append(tuple(new_sample))
+                batch = new_batch                    
+
             return torch.utils.data.dataloader.default_collate(batch)
         
         return torch.utils.data.DataLoader(

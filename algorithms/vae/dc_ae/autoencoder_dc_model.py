@@ -12,10 +12,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+from omegaconf import DictConfig
+from algorithms.common.base_pytorch_algo import BasePytorchAlgo
+from lightning.pytorch.utilities.types import STEP_OUTPUT
+from pathlib import Path
 from typing import Optional, Tuple, Union
 from safetensors.torch import load_file
 from omegaconf import OmegaConf
+from einops import rearrange
+from utils.storage_utils import safe_torch_save
+from utils.logging_utils import log_video
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -457,7 +463,7 @@ class Decoder(nn.Module):
         return hidden_states
 
 
-@MODEL_REGISTRY.register()
+# @MODEL_REGISTRY.register()
 class MyAutoencoderDC(ModelMixin, ConfigMixin):
     r"""
     An Autoencoder model introduced in [DCAE](https://arxiv.org/abs/2410.10733) and used in
@@ -504,53 +510,54 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
 
     _supports_gradient_checkpointing = False
 
-    @register_to_config
     def __init__(
         self,
-        in_channels: int = 3,
-        latent_channels: int = 32,
-        attention_head_dim: int = 32,
-        encoder_block_types: Union[str, Tuple[str]] = 'ResBlock',
-        decoder_block_types: Union[str, Tuple[str]] = 'ResBlock',
-        encoder_block_out_channels: Tuple[int, ...] = (128, 256, 512, 512, 1024, 1024),
-        decoder_block_out_channels: Tuple[int, ...] = (128, 256, 512, 512, 1024, 1024),
-        encoder_layers_per_block: Tuple[int] = (2, 2, 2, 3, 3, 3),
-        decoder_layers_per_block: Tuple[int] = (3, 3, 3, 3, 3, 3),
-        encoder_qkv_multiscales: Tuple[Tuple[int, ...], ...] = ((), (), (), (5, ), (5, ), (5, )),
-        decoder_qkv_multiscales: Tuple[Tuple[int, ...], ...] = ((), (), (), (5, ), (5, ), (5, )),
-        upsample_block_type: str = 'pixel_shuffle',
-        downsample_block_type: str = 'pixel_unshuffle',
-        decoder_norm_types: Union[str, Tuple[str]] = 'rms_norm',
-        decoder_act_fns: Union[str, Tuple[str]] = 'silu',
-        scaling_factor: float = 1.0,
+        cfg: DictConfig
+        # in_channels: int = 3,
+        # latent_channels: int = 32,
+        # attention_head_dim: int = 32,
+        # encoder_block_types: Union[str, Tuple[str]] = 'ResBlock',
+        # decoder_block_types: Union[str, Tuple[str]] = 'ResBlock',
+        # encoder_block_out_channels: Tuple[int, ...] = (128, 256, 512, 512, 1024, 1024),
+        # decoder_block_out_channels: Tuple[int, ...] = (128, 256, 512, 512, 1024, 1024),
+        # encoder_layers_per_block: Tuple[int] = (2, 2, 2, 3, 3, 3),
+        # decoder_layers_per_block: Tuple[int] = (3, 3, 3, 3, 3, 3),
+        # encoder_qkv_multiscales: Tuple[Tuple[int, ...], ...] = ((), (), (), (5, ), (5, ), (5, )),
+        # decoder_qkv_multiscales: Tuple[Tuple[int, ...], ...] = ((), (), (), (5, ), (5, ), (5, )),
+        # upsample_block_type: str = 'pixel_shuffle',
+        # downsample_block_type: str = 'pixel_unshuffle',
+        # decoder_norm_types: Union[str, Tuple[str]] = 'rms_norm',
+        # decoder_act_fns: Union[str, Tuple[str]] = 'silu',
+        # scaling_factor: float = 1.0,
     ) -> None:
         super().__init__()
+        self.cfg = cfg
 
         self.encoder = Encoder(
-            in_channels=in_channels,
-            latent_channels=latent_channels,
-            attention_head_dim=attention_head_dim,
-            block_type=encoder_block_types,
-            block_out_channels=encoder_block_out_channels,
-            layers_per_block=encoder_layers_per_block,
-            qkv_multiscales=encoder_qkv_multiscales,
-            downsample_block_type=downsample_block_type,
+            in_channels=self.cfg.in_channels,
+            latent_channels=self.cfg.latent_channels,
+            attention_head_dim=self.cfg.attention_head_dim,
+            block_type=self.cfg.encoder_block_types,
+            block_out_channels=self.cfg.encoder_block_out_channels,
+            layers_per_block=self.cfg.encoder_layers_per_block,
+            qkv_multiscales=self.cfg.encoder_qkv_multiscales,
+            downsample_block_type=self.cfg.downsample_block_type,
         )
 
         self.decoder = Decoder(
-            in_channels=in_channels,
-            latent_channels=latent_channels,
-            attention_head_dim=attention_head_dim,
-            block_type=decoder_block_types,
-            block_out_channels=decoder_block_out_channels,
-            layers_per_block=decoder_layers_per_block,
-            qkv_multiscales=decoder_qkv_multiscales,
-            norm_type=decoder_norm_types,
-            act_fn=decoder_act_fns,
-            upsample_block_type=upsample_block_type,
+            in_channels=self.cfg.in_channels,
+            latent_channels=self.cfg.latent_channels,
+            attention_head_dim=self.cfg.attention_head_dim,
+            block_type=self.cfg.decoder_block_types,
+            block_out_channels=self.cfg.decoder_block_out_channels,
+            layers_per_block=self.cfg.decoder_layers_per_block,
+            qkv_multiscales=self.cfg.decoder_qkv_multiscales,
+            norm_type=self.cfg.decoder_norm_types,
+            act_fn=self.cfg.decoder_act_fns,
+            upsample_block_type=self.cfg.upsample_block_type,
         )
 
-        self.spatial_compression_ratio = 2**(len(encoder_block_out_channels) - 1)
+        self.spatial_compression_ratio = 2**(len(self.cfg.encoder_block_out_channels) - 1)
         self.temporal_compression_ratio = 1
 
         # When decoding a batch of video latents at a time, one can save memory by slicing across the batch dimension
@@ -634,7 +641,6 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
     def get_last_layer(self):
         return self.decoder.conv_out.conv.weight
 
-    @apply_forward_hook
     def encode(
         self,
         x: torch.Tensor,
@@ -658,9 +664,7 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
         else:
             encoded = self._encode(x)
 
-        if not return_dict:
-            return (encoded, )
-        return EncoderOutput(latent=encoded)
+        return encoded
 
     def _decode(self, z: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, height, width = z.shape
@@ -693,9 +697,7 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
         else:
             decoded = self._decode(z)
 
-        if not return_dict:
-            return (decoded, )
-        return DecoderOutput(sample=decoded)
+        return decoded
 
     def tiled_encode(self, x: torch.Tensor, return_dict: bool = True) -> torch.Tensor:
         raise NotImplementedError('`tiled_encode` has not been implemented for AutoencoderDC.')
@@ -715,7 +717,7 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
         return DecoderOutput(sample=decoded)
     
     @classmethod
-    def _from_pretrained_custom(cls, path: str, cfg_path: str) -> "MyAutoencoderDC":
+    def _from_pretrained_custom(cls, cfg, path: str, **kwargs) -> "MyAutoencoderDC":
         if is_wandb_run_path(path):
             path = wandb_to_local_path(path)
         elif is_hf_path(path):
@@ -726,11 +728,8 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
         else:
             checkpoint = torch.load(path, map_location="cpu")
         
-        if "cfg" not in checkpoint:
-            cfg = OmegaConf.load(cfg_path)
-        else:
-            cfg = OmegaConf.create(checkpoint["cfg"])
-            checkpoint.pop("cfg")
+        # cfg = OmegaConf.create(checkpoint["cfg"])
+        # checkpoint.pop("cfg")
 
         model = cls(cfg)
         model.load_state_dict(checkpoint, strict=False)
@@ -743,9 +742,125 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
         vae = MyAutoencoderDC.from_pretrained(path, **kwargs)
     
     @classmethod
-    def from_pretrained(cls, path: str, **kwargs) -> "MyAutoencoderDC":
+    def from_pretrained(cls, cfg, **kwargs) -> "MyAutoencoderDC":
+        path = cfg.pretrained_path
         if path.startswith("diffuser:"):
             path = path.replace("diffuser:", "")
             return cls._from_pretrained_diffuser(path, **kwargs)
         else:
-            return cls._from_pretrained_custom(path, **kwargs)
+            return cls._from_pretrained_custom(cfg, path, **kwargs)
+
+
+class DCAEPreprocessor(BasePytorchAlgo):
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
+        self.pretrained_path = cfg.pretrained_path
+        self.pretrained_kwargs = cfg.pretrained_kwargs
+        self.use_fp16 = cfg.precision == "16-true"
+        self.max_encode_length = cfg.max_encode_length
+        self.max_decode_length = cfg.logging.max_video_length
+        self.log_every_n_batch = cfg.logging.every_n_batch
+        super().__init__(cfg)
+
+    def _build_model(self):
+        self.vae = MyAutoencoderDC.from_pretrained(
+            cfg=self.cfg,
+            torch_dtype=torch.float16 if self.use_fp16 else torch.float32,
+            **self.pretrained_kwargs,
+        )
+
+    def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
+        raise NotImplementedError(
+            "Training not implemented for VAEVideo. Only used for validation"
+        )
+
+    def test_step(self, batch, batch_idx) -> STEP_OUTPUT:
+        raise NotImplementedError(
+            "Testing not implemented for VAEVideo. Only used for validation"
+        )
+    
+    def validation_step(self, batch, batch_idx, dataloader_idx=0) -> STEP_OUTPUT:
+        #videos, latent_paths = batch
+        videos = batch["videos"]
+        latent_paths = batch["latent_paths"]
+        video_lengths = batch["video_lengths"]
+        latent_paths = [Path(path) for path in latent_paths]
+        all_done = True
+        for latent_path in latent_paths:
+            if not latent_path.exists():
+                all_done = False
+                break
+        if all_done:
+            # print(f"Latent already exists for {latent_paths[0]}. Skipping.")
+            return None
+
+        batch_size = videos.shape[0]
+        videos = self._rearrange_and_normalize(videos)
+
+        # Encode the video data into a latent space
+        # always convert to float16 (as they will be saved as float16 tensors)
+        latents = self._encode_videos(videos)
+        # latents = latent_dist.sample().to(torch.float16)
+
+        # just to see the progress in wandb
+        if batch_idx % 1000 == 0:
+            self.log("dummy", 0.0)
+
+        # log gt vs reconstructed video to wandb
+        if batch_idx % self.log_every_n_batch == 0 and self.logger:
+            reconstructed_videos = self.vae.decode(latents)
+            reconstructed_videos = reconstructed_videos.detach().cpu()
+            videos = self._rearrange_and_unnormalize(videos, batch_size)
+            reconstructed_videos = self._rearrange_and_unnormalize(
+                reconstructed_videos, batch_size
+            )
+
+            videos = videos.detach().cpu()[:, : self.max_decode_length]
+            reconstructed_videos = reconstructed_videos[:, : self.max_decode_length]
+            log_video(
+                reconstructed_videos,
+                videos,
+                step=self.global_step,
+                namespace="reconstruction_vis",
+                logger=self.logger.experiment,
+                captions=[
+                    f"{p.parent.parent.name}/{p.parent.name}/{p.stem}"
+                    for p in latent_paths
+                ],
+            )
+        
+        # save the latent to disk
+        latents_to_save = (
+            rearrange(
+                latents,
+                "(b f) c h w -> b f c h w",
+                b=batch_size,
+            )
+            .detach()
+            .cpu()
+        )
+        for i, (latent, latent_path) in enumerate(zip(latents_to_save, latent_paths)):
+            # should clone latent to avoid having large file size
+            safe_torch_save(latent[:video_lengths[i].cpu().item()].clone(), latent_path)
+        return None
+
+    def _encode_videos(self, video: torch.Tensor):
+        chunks = video.chunk(
+            (len(video) + self.max_encode_length - 1) // self.max_encode_length, dim=0
+        )
+        latent_dist_list = []
+        for chunk in chunks:
+            latent_dist_list.append(self.vae.encode(chunk))
+        return torch.cat(latent_dist_list, dim=0)
+    
+    def _rearrange_and_normalize(self, videos: torch.Tensor) -> torch.Tensor:
+        videos = rearrange(videos, "b f c h w -> (b f) c h w")
+        videos = 2.0 * videos - 1.0
+        return videos
+
+    def _rearrange_and_unnormalize(
+        self, videos: torch.Tensor, batch_size: int
+    ) -> torch.Tensor:
+        videos = 0.5 * videos + 0.5
+        videos = rearrange(videos, "(b f) c h w -> b f c h w", b=batch_size)
+        return videos

@@ -1,0 +1,17 @@
+# @package _global_
+# 12 x H100 GPUs
+
+# When the (dataset, experiment) pair aligns with the file name of this yaml, 
+# the values here will override individual yamls files for dataset, algorithm and experiment.
+# useful for dataset-specific overrides
+
+dataset:
+  resolution: 64
+  latent:
+    suffix: 17035ae5
+
+algorithm:
+  pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_DMLab_Res64-17035ae5.pth
+
+experiment:
+  batch_size: 15

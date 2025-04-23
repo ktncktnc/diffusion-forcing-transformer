@@ -1,7 +1,10 @@
 from datasets.video import (
     MinecraftSimpleVideoDataset,
+    UCF101SimpleVideoDataset,
+    DMLabSimpleVideoDataset,
+    BAIRSimpleVideoDataset
 )
-from algorithms.vae import ImageVAEPreprocessor
+from algorithms.vae import ImageVAEPreprocessor, DCAEPreprocessor
 from .base_exp import BaseLightningExperiment
 from .data_modules import ValDataModule
 
@@ -13,10 +16,14 @@ class VideoLatentPreprocessingExperiment(BaseLightningExperiment):
 
     compatible_algorithms = dict(
         image_vae_preprocessor=ImageVAEPreprocessor,
+        dc_ae_preprocessor=DCAEPreprocessor,
     )
 
     compatible_datasets = dict(
         minecraft=MinecraftSimpleVideoDataset,
+        ucf_101=UCF101SimpleVideoDataset,
+        dmlab=DMLabSimpleVideoDataset,
+        bair=BAIRSimpleVideoDataset
     )
 
     data_module_cls = ValDataModule

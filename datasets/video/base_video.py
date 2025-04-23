@@ -15,7 +15,6 @@ from datasets.video.utils import read_video, VideoTransform
 
 SPLIT = Literal["training", "validation", "test"]
 
-
 class BaseVideoDataset(torch.utils.data.Dataset, ABC):
     """
     Common base class for video dataset.
@@ -214,7 +213,7 @@ class BaseVideoDataset(torch.utils.data.Dataset, ABC):
         Convert video_path to latent_path
         """
         return (
-            self.latent_dir / video_metadata["video_paths"].relative_to(self.save_dir)
+            self.latent_dir / Path(video_metadata["video_paths"]).relative_to(self.save_dir)
         ).with_suffix(".pt")
 
     def get_latent_paths(self, split: SPLIT) -> List[Path]:
@@ -281,12 +280,13 @@ class BaseSimpleVideoDataset(BaseVideoDataset):
         """
         video_metadata = self.metadata[idx]
         video = self.load_video(video_metadata, 0)
-
-        return (
-            self.transform(video),
-            self.video_metadata_to_latent_path(video_metadata).as_posix(),
-        )
-
+        video = self.transform(video)
+        sample = {
+            'videos': video,
+            'latent_paths': self.video_metadata_to_latent_path(video_metadata).as_posix(),
+            'video_lengths': self.video_length(video_metadata),
+        }
+        return sample
 
 class BaseAdvancedVideoDataset(BaseVideoDataset):
     """
