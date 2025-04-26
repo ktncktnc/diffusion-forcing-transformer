@@ -99,6 +99,7 @@ class SpaceEfficientWandbLogger(WandbLogger):
         self._last_artifacts = []
 
     def _scan_and_log_checkpoints(self, checkpoint_callback: ModelCheckpoint) -> None:
+        return
         import wandb
 
         # get checkpoints to be saved with associated score

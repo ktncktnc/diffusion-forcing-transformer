@@ -7,11 +7,11 @@ defaults:
 latent:
   suffix: 1cd9pgpb
 save_dir: /weka/s224075134/temporal_diffusion/datasets/video/minecraft
-max_frames: 50
+max_frames: 24
 frame_skip: 2
 external_cond_stack: true
 external_cond_processing: mask_first
-context_length: 25
+context_length: 12
 resolution: 256
 data_mean: [[[0.557]], [[0.222]], [[0.416]], [[-0.847]]]
 data_std: [[[4.268]], [[4.953]], [[5.722]], [[7.336]]]

@@ -4,4 +4,4 @@
 defaults:
   - realestate10k
 
-save_dir: /weka/s224075134/temporal_diffusion/diffusion-forcing-transformer/data/real-estate-10k-mini
+save_dir: /scratch/s224075134/temporal_diffusion/datasets/video/real-estate-10k-mini

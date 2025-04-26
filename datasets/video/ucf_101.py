@@ -142,6 +142,13 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
         }
         torch.save(metadata, self.metadata_dir / f"{split}.pt")
 
+    def get_latent_paths(self, split: SPLIT) -> List[Path]:
+        """
+        Return list of latent paths for the given split
+        """
+        metadata = torch.load(self.metadata_dir / f"{split}.pt", weights_only=False)
+        return sorted([self.video_metadata_to_latent_path({key: metadata[key][i] for key in metadata.keys()}) for i in range(len(metadata["video_paths"]))], key=str)
+
     def setup(self) -> None:
         if self.use_video_preprocessing:
             # if not (
@@ -180,14 +187,6 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
                 pbar.refresh()
 
         print('Done!')
-
-            # list(
-            #     tqdm(
-            #         pool.imap(preprocess_fn, video_paths),
-            #         total=len(video_paths),
-            #         ,
-            #     )
-            # )
 
     def exclude_failed_videos(
         self, metadata: List[Dict[str, Any]]
@@ -324,9 +323,6 @@ class UCF101AdvancedVideoDataset(
             else:
                 # load video only
                 video = self.load_video(video_metadata, start_frame, end_frame)
-
-        if video is None:
-            return None
 
         lens = [len(x) for x in (video, cond, latent) if x is not None]
         assert len(set(lens)) == 1, "video, cond, latent must have the same length"

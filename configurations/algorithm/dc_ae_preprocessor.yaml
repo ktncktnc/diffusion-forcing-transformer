@@ -1,6 +1,7 @@
 defaults:
   - base_pytorch_algo
   
+name: dc_ae_preprocessor
 attention_head_dim: 32
 decoder_act_fns: [relu, relu, relu, silu]
 decoder_block_out_channels: [128, 256, 512, 512]

@@ -10,11 +10,11 @@ defaults:
   - ../algorithm@algorithm.vae: dc_ae_preprocessor
 
 dataset:
-  num_eval_videos: 6144
+  num_eval_videos: 768
   subdataset_size: null
   latent:
     enable: True
-    suffix: 9da18dcf
+    suffix: 1a8547fb
     type: pre_sample
 
 algorithm:
@@ -34,7 +34,7 @@ algorithm:
   diffusion_clip_frames: 16
   contrastive_loss_weight: 0.3
   vae:
-    pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_UCF101_Res64-9da18dcf.pth
+    pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_BAIR_Res64-1a8547fb.pth
     batch_size: 16
 
 experiment:
@@ -50,13 +50,15 @@ experiment:
       num_workers: 11
       shuffle: True
     checkpointing:
-      every_n_train_steps: 30001
+      every_n_epochs: 1
+      every_n_train_steps: null
       save_last: True
       save_top_k: 5
       monitor: "prediction/fvd"
   validation:
     batch_size: 16
-    val_every_n_step: 30000
+    val_every_n_epoch: 1
+    val_every_n_step: null
     data:
       num_workers: 1
     limit_batch: 20

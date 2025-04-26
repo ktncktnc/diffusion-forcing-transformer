@@ -133,7 +133,7 @@ class DiT3D(BaseBackbone):
             emb = emb + self.external_cond_embedding(external_cond, external_cond_mask)
         emb = repeat(emb, "b t c -> b (t p) c", p=self.num_patches)
 
-        x = self.dit_base(x, emb)  # (B, N, C)
+        x, rep = self.dit_base(x, emb, return_representation=True)  # (B, N, C)
         
         x = self.unpatchify(
             rearrange(x, "b (t p) c -> (b t) p c", p=self.num_patches)

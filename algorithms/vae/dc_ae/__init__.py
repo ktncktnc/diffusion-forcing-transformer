@@ -1,1 +1,1 @@
-from .autoencoder_dc_model import DCAEPreprocessor
+from .autoencoder_dc_model import DCAEPreprocessor, MyAutoencoderDC

@@ -212,9 +212,10 @@ class BaseVideoDataset(torch.utils.data.Dataset, ABC):
         """
         Convert video_path to latent_path
         """
-        return (
+        path = (
             self.latent_dir / Path(video_metadata["video_paths"]).relative_to(self.save_dir)
         ).with_suffix(".pt")
+        return path
 
     def get_latent_paths(self, split: SPLIT) -> List[Path]:
         """

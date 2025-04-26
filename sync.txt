@@ -1,0 +1,12 @@
+rsync -a outputs s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage/projects/temporal_diffusion/diffusion-forcing-transformer --info=progress
+
+
+rsync -a minecraft_latent_32_1cd9pgpb.zip s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage/projects/temporal_diffusion/datasets/video
+
+
+python -m main '+name=UCF_101_dit3d' 'dataset=ucf_101' 'algorithm=contrastive_dfot_video' 'experiment=video_generation' 'algorithm.contrastive_loss_weight=0' 'algorithm.backbone=null' '++algorithm.backbone.name=dit3d' '++algorithm.backbone.variant=full' '++algorithm.backbone.pos_emb_type=rope_3d' '++algorithm.backbone.patch_size=2' '++algorithm.backbone.hidden_size=384' '++algorithm.backbone.depth=12' '++algorithm.backbone.num_heads=6' '++algorithm.backbone.mlp_ratio=4.0' 'load=/weka/s224075134/temporal_diffusion/diffusion-forcing-transformer/outputs/2025-04-14/14-43-35/checkpoints/epoch\=89-step\=168750.ckpt' experiment.validation.limit_batch=200 experiment.tasks=[validation] '++algorithm.backbone.use_gradient_checkpointing=False'
+
+
+python -m main +name=single_image_to_short dataset=realestate10k_mini algorithm=dfot_video_pose experiment=video_generation @diffusion/continuous load=pretrained:DFoT_RE10K.ckpt 'experiment.tasks=[validation]' experiment.validation.data.shuffle=True dataset.context_length=1 dataset.frame_skip=20 dataset.n_frames=8 experiment.validation.batch_size=1 algorithm.tasks.prediction.history_guidance.name=vanilla +algorithm.tasks.prediction.history_guidance.guidance_scale=4.0 dataset.max_frames=4 wandb.mode=disabled
+
+python -m main +name=Preprocessing_UCF101 dataset=ucf101 algorithm=dc_ae_preprocessor experiment=video_latent_preprocessing

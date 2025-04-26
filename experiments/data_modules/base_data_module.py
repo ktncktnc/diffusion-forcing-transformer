@@ -88,7 +88,7 @@ class BaseDataModule(pl.LightningDataModule):
                 if hasattr(dataset, "worker_init_fn")
                 else None
             ),
-            collate_fn=collate_fn
+            # collate_fn=collate_fn
         )
 
 

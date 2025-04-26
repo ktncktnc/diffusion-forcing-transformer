@@ -27,7 +27,7 @@ from .diffusion import (
 from .history_guidance import HistoryGuidance
 
 
-class DFoTVideo(BasePytorchAlgo):
+class GibbsDFoTVideo(BasePytorchAlgo):
     """
     An algorithm for training and evaluating
     Diffusion Forcing Transformer (DFoT) for video generation.
@@ -317,11 +317,17 @@ class DFoTVideo(BasePytorchAlgo):
         """Training step"""
         xs, conditions, masks, *_ = batch
 
-        noise_levels, masks = self._get_training_noise_levels(xs, masks)
+        if self.cfg.noise_level == "gibbs":
+            noise_levels, frame_idx, masks = self._get_training_noise_levels(xs, masks)
+        else:
+            noise_levels, masks = self._get_training_noise_levels(xs, masks)
+            frame_idx = None
+
         xs_pred, loss = self.diffusion_model(
             xs,
             self._process_conditions(conditions),
             k=noise_levels,
+            frame_idx=frame_idx,
         )
         loss = self._reweight_loss(loss, masks)
 
@@ -528,6 +534,7 @@ class DFoTVideo(BasePytorchAlgo):
         key_conditions = (
             conditions[:, keyframe_indices] if conditions is not None else None
         )
+
         # 1. Predict the keyframes
         xs_pred_key, *_ = self._predict_sequence(
             xs_pred[:, : self.n_context_tokens],
@@ -850,28 +857,38 @@ class DFoTVideo(BasePytorchAlgo):
 
         # baseline training (SD: fixed_context, BD: variable_context)
         context_mask = None
-        if self.cfg.variable_context.enabled:
-            assert (
-                not self.cfg.fixed_context.enabled
-            ), "Cannot use both fixed and variable context"
-            context_mask = bernoulli_tensor(
-                (batch_size, n_tokens),
-                self.cfg.variable_context.prob,
-                device=self.device,
-                generator=self.generator,
-            ).bool()
-        elif self.cfg.fixed_context.enabled:
-            context_indices = self.cfg.fixed_context.indices or list(
-                range(self.n_context_tokens)
-            )
-            context_mask = torch.zeros(
-                (batch_size, n_tokens), dtype=torch.bool, device=xs.device
-            )
-            context_mask[:, context_indices] = True
+        # if self.cfg.variable_context.enabled:
+        #     assert (
+        #         not self.cfg.fixed_context.enabled
+        #     ), "Cannot use both fixed and variable context"
+        #     context_mask = bernoulli_tensor(
+        #         (batch_size, n_tokens),
+        #         self.cfg.variable_context.prob,
+        #         device=self.device,
+        #         generator=self.generator,
+        #     ).bool()
+        # elif self.cfg.fixed_context.enabled:
+        #     context_indices = self.cfg.fixed_context.indices or list(
+        #         range(self.n_context_tokens)
+        #     )
+        #     context_mask = torch.zeros(
+        #         (batch_size, n_tokens), dtype=torch.bool, device=xs.device
+        #     )
+        #     context_mask[:, context_indices] = True
 
         match self.cfg.noise_level:
             case "random_independent":  # independent noise levels (Diffusion Forcing)
                 noise_levels = rand_fn((batch_size, n_tokens))
+            case "gibbs":
+                noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
+                # random frame index
+                frame_idx = torch.randint(0, n_tokens, (batch_size,), device=xs.device)
+                # frame 0 to frame_idx - 1 will be minus 1
+                noise_skip = torch.randint(self.cfg.diffusion.min_noise_skip, self.cfg.diffusion.max_noise_skip, (batch_size,), device=xs.device)
+                for i in range(batch_size):
+                    noise_levels[i, : frame_idx[i]] = (
+                        noise_levels[i, : frame_idx[i]] - noise_skip[i]
+                    ).clamp(0)
             case "random_uniform":  # uniform noise levels (Typical Video Diffusion)
                 noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
 
@@ -890,34 +907,37 @@ class DFoTVideo(BasePytorchAlgo):
             ),
         )
 
-        if context_mask is not None:
-            # binary dropout training to enable guidance
-            dropout = (
-                (
-                    self.cfg.variable_context
-                    if self.cfg.variable_context.enabled
-                    else self.cfg.fixed_context
-                ).dropout
-                if self.trainer.training
-                else 0.0
-            )
-            context_noise_levels = bernoulli_tensor(
-                (batch_size, 1),
-                dropout,
-                device=xs.device,
-                generator=self.generator,
-            )
-            if not self.cfg.diffusion.is_continuous:
-                context_noise_levels = context_noise_levels.long() * (
-                    self.timesteps - 1
-                )
-            noise_levels = torch.where(context_mask, context_noise_levels, noise_levels)
+        # if context_mask is not None:
+        #     # binary dropout training to enable guidance
+        #     dropout = (
+        #         (
+        #             self.cfg.variable_context
+        #             if self.cfg.variable_context.enabled
+        #             else self.cfg.fixed_context
+        #         ).dropout
+        #         if self.trainer.training
+        #         else 0.0
+        #     )
+        #     context_noise_levels = bernoulli_tensor(
+        #         (batch_size, 1),
+        #         dropout,
+        #         device=xs.device,
+        #         generator=self.generator,
+        #     )
+        #     if not self.cfg.diffusion.is_continuous:
+        #         context_noise_levels = context_noise_levels.long() * (
+        #             self.timesteps - 1
+        #         )
+        #     noise_levels = torch.where(context_mask, context_noise_levels, noise_levels)
 
-            # modify masks to exclude context frames from loss computation
-            context_mask = rearrange(
-                context_mask, "b t -> b t" + " 1" * len(masks.shape[2:])
-            )
-            masks = torch.where(context_mask, False, masks)
+        #     # modify masks to exclude context frames from loss computation
+        #     context_mask = rearrange(
+        #         context_mask, "b t -> b t" + " 1" * len(masks.shape[2:])
+        #     )
+        #     masks = torch.where(context_mask, False, masks)
+
+        if self.cfg.noise_level == 'gibbs':
+            return noise_levels, frame_idx, masks
 
         return noise_levels, masks
 
@@ -1338,6 +1358,7 @@ class DFoTVideo(BasePytorchAlgo):
                     conditions_mask,
                     guidance_fn=composed_guidance_fn,
                 )
+
                 xs_pred = history_guidance_manager.compose(xs_pred)
 
             # only replace the tokens being generated (revert context tokens)
@@ -1420,6 +1441,9 @@ class DFoTVideo(BasePytorchAlgo):
         mean = self.data_mean.reshape(shape)
         std = self.data_std.reshape(shape)
         return xs * std + mean
+    
+    # def _generate_gibbs_scheduling_matrix(self, horizon: int, timesteps: int):
+        
 
     # ---------------------------------------------------------------------
     # Checkpoint Utils
