@@ -4,7 +4,7 @@ from torch import Tensor
 from omegaconf import DictConfig
 from einops import rearrange
 from utils.geometry_utils import CameraPose
-from .dfot_video import DFoTVideo
+from .gibbs_dfot_video import DFoTVideo
 
 
 class DFoTVideoPose(DFoTVideo):

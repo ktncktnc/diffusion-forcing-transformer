@@ -363,8 +363,8 @@ class DFoTVideo(BasePytorchAlgo):
         # 1. If running validation while training a model, directly evaluate
         # the denoising performance to detect overfitting, etc.
         # Logs the "denoising_vis" visualization as well as "validation/loss" metric.
-        if self.trainer.state.fn == "FIT":
-            self._eval_denoising(batch, batch_idx, namespace=namespace)
+        # if self.trainer.state.fn == "FIT":
+        self._eval_denoising(batch, batch_idx, namespace=namespace)
 
         # 2. Sample all videos (based on the specified tasks)
         # and log the generated videos and metrics.
@@ -429,10 +429,11 @@ class DFoTVideo(BasePytorchAlgo):
         batch = (xs, conditions, masks, gt_videos)
         output = self.training_step(batch, batch_idx, namespace=namespace)
 
-        gt_videos = gt_videos if self.is_latent_diffusion else output["xs"]
+        gt_videos = output["xs"]
         recons = output["xs_pred"]
         if self.is_latent_diffusion:
             recons = self._decode(recons)
+            gt_videos = self._decode(gt_videos)
 
         if recons.shape[1] < gt_videos.shape[1]:  # recons.ndim is 5
             recons = F.pad(
@@ -1392,11 +1393,20 @@ class DFoTVideo(BasePytorchAlgo):
         return rearrange(torch.cat(outputs, 0), f"b c t h w -> {shape}")
 
     def _encode(self, x: Tensor, shape: str = "b t c h w") -> Tensor:
-        return self._run_vae(
-            x, shape, lambda y: self.vae.encode(2.0 * y - 1.0).sample()
-        )
+        if isinstance(self.vae, MyAutoencoderDC):
+            fn = lambda y: self.vae.encode(2.0 * y - 1.0)
+        else:
+            fn = lambda y: self.vae.encode(2.0 * y - 1.0).sample()
+        return self._run_vae(x, shape, fn)
 
     def _decode(self, latents: Tensor, shape: str = "b t c h w") -> Tensor:
+        if isinstance(self.vae, MyAutoencoderDC):
+            return self._run_vae(
+                latents,
+                shape,
+                lambda y: self.vae.decode(y) * 0.5 + 0.5
+            )
+
         return self._run_vae(
             latents,
             shape,

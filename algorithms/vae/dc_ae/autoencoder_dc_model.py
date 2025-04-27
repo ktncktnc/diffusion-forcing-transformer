@@ -85,8 +85,9 @@ class SanaMultiscaleLinearAttention(nn.Module):
 
     def apply_linear_attention(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
         value = F.pad(value, (0, 0, 0, 1), mode='constant', value=1)  # Adds padding
-        scores = torch.matmul(value, key.transpose(-1, -2))
-        hidden_states = torch.matmul(scores, query)
+        with torch.cuda.amp.autocast(enabled=False):
+            scores = torch.matmul(value, key.transpose(-1, -2))
+            hidden_states = torch.matmul(scores, query)
 
         hidden_states = hidden_states.to(dtype=torch.float32)
         hidden_states = hidden_states[:, :, :-1] / (hidden_states[:, :, -1:] + self.eps)
@@ -513,22 +514,6 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
     def __init__(
         self,
         cfg: DictConfig
-        # in_channels: int = 3,
-        # latent_channels: int = 32,
-        # attention_head_dim: int = 32,
-        # encoder_block_types: Union[str, Tuple[str]] = 'ResBlock',
-        # decoder_block_types: Union[str, Tuple[str]] = 'ResBlock',
-        # encoder_block_out_channels: Tuple[int, ...] = (128, 256, 512, 512, 1024, 1024),
-        # decoder_block_out_channels: Tuple[int, ...] = (128, 256, 512, 512, 1024, 1024),
-        # encoder_layers_per_block: Tuple[int] = (2, 2, 2, 3, 3, 3),
-        # decoder_layers_per_block: Tuple[int] = (3, 3, 3, 3, 3, 3),
-        # encoder_qkv_multiscales: Tuple[Tuple[int, ...], ...] = ((), (), (), (5, ), (5, ), (5, )),
-        # decoder_qkv_multiscales: Tuple[Tuple[int, ...], ...] = ((), (), (), (5, ), (5, ), (5, )),
-        # upsample_block_type: str = 'pixel_shuffle',
-        # downsample_block_type: str = 'pixel_unshuffle',
-        # decoder_norm_types: Union[str, Tuple[str]] = 'rms_norm',
-        # decoder_act_fns: Union[str, Tuple[str]] = 'silu',
-        # scaling_factor: float = 1.0,
     ) -> None:
         super().__init__()
         self.cfg = cfg
@@ -677,7 +662,7 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
         return decoded
 
     @apply_forward_hook
-    def decode(self, z: torch.Tensor, return_dict: bool = True) -> Union[DecoderOutput, Tuple[torch.Tensor]]:
+    def decode(self, z: torch.Tensor) -> Union[DecoderOutput, Tuple[torch.Tensor]]:
         r"""
         Decode a batch of images.
 
@@ -791,7 +776,6 @@ class DCAEPreprocessor(BasePytorchAlgo):
                 all_done = False
                 break
         if all_done:
-            # print(f"Latent already exists for {latent_paths[0]}. Skipping.")
             return None
 
         batch_size = videos.shape[0]

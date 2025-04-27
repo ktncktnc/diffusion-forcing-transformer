@@ -1284,6 +1284,10 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         for m in range(scheduling_matrix.shape[0] - 1):
             from_noise_levels = scheduling_matrix[m]
             to_noise_levels = scheduling_matrix[m + 1]
+            frame_idx = ((from_noise_levels - to_noise_levels) == 0).nonzero(
+                as_tuple=False
+            )[0]
+            frame_idx = repeat(frame_idx, 't -> (b t)', b=batch_size)
 
             # update context mask by changing 0 -> 2 for fully generated tokens
             context_mask = torch.where(
@@ -1357,6 +1361,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
                     ),
                     conditions_mask,
                     guidance_fn=composed_guidance_fn,
+                    frame_idx=frame_idx
                 )
 
                 xs_pred = history_guidance_manager.compose(xs_pred)
@@ -1413,11 +1418,20 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         return rearrange(torch.cat(outputs, 0), f"b c t h w -> {shape}")
 
     def _encode(self, x: Tensor, shape: str = "b t c h w") -> Tensor:
-        return self._run_vae(
-            x, shape, lambda y: self.vae.encode(2.0 * y - 1.0).sample()
-        )
+        if isinstance(self.vae, MyAutoencoderDC):
+            fn = lambda y: self.vae.encode(2.0 * y - 1.0)
+        else:
+            fn = lambda y: self.vae.encode(2.0 * y - 1.0).sample()
+        return self._run_vae(x, shape, fn)
 
     def _decode(self, latents: Tensor, shape: str = "b t c h w") -> Tensor:
+        if isinstance(self.vae, MyAutoencoderDC):
+            return self._run_vae(
+                latents,
+                shape,
+                lambda y: self.vae.decode(y) * 0.5 + 0.5
+            )
+
         return self._run_vae(
             latents,
             shape,

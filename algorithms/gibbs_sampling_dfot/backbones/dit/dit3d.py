@@ -121,11 +121,21 @@ class DiT3D(BaseBackbone):
         noise_levels: torch.Tensor,
         external_cond: Optional[torch.Tensor] = None,
         external_cond_mask: Optional[torch.Tensor] = None,
+        gibbs_frame_idx: Optional[int] = None,
     ) -> torch.Tensor:
-        input_batch_size = x.shape[0]
+        input_batch_size, n_frames = x.shape[:2]
         x = rearrange(x, "b t c h w -> (b t) c h w")
         x = self.patch_embedder(x)
         x = rearrange(x, "(b t) p c -> b (t p) c", b=input_batch_size)
+        if gibbs_frame_idx is not None:
+            mask = self.generate_gibbs_attention_mask(
+                n_frames=n_frames,
+                n_tokens_per_frame=self.num_patches,
+                frame_idx=gibbs_frame_idx,
+                device=x.device,
+            )
+        else:
+            mask = None
 
         emb = self.noise_level_pos_embedding(noise_levels)
 
@@ -133,7 +143,7 @@ class DiT3D(BaseBackbone):
             emb = emb + self.external_cond_embedding(external_cond, external_cond_mask)
         emb = repeat(emb, "b t c -> b (t p) c", p=self.num_patches)
 
-        x, rep = self.dit_base(x, emb, return_representation=True)  # (B, N, C)
+        x = self.dit_base(x, emb, attn_mask=mask)  # (B, N, C)
         
         x = self.unpatchify(
             rearrange(x, "b (t p) c -> (b t) p c", p=self.num_patches)
@@ -142,3 +152,19 @@ class DiT3D(BaseBackbone):
             x, "(b t) h w c -> b t c h w", b=input_batch_size
         )  # (B, T, C, H, W)
         return x
+
+    def generate_gibbs_attention_mask(self, n_frames: int, n_tokens_per_frame: int, frame_idx, device) -> torch.Tensor:
+        """
+        Generate a Gibbs attention mask for the given number of frames and tokens per frame.
+        Args:
+            n_frames: Number of frames.
+            n_tokens_per_frame: Number of tokens per frame. In case of factorized attention, n_tokens_per_frame = 1
+        Returns:
+            A tensor representing the attention mask.
+        """
+        # Create a mask with shape (n_frames, n_tokens_per_frame, n_tokens_per_frame)
+        mask = torch.ones((n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device=device)
+        mask = repeat(mask, "h w -> b h w", b=frame_idx.shape[0])
+        for i in range(len(frame_idx)):
+            mask[i, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
+        return mask

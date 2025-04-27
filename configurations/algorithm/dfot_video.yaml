@@ -64,7 +64,7 @@ diffusion:
 vae:
   pretrained_path: null
   pretrained_kwargs: {}
-  use_fp16: True
+  use_fp16: False
   batch_size: 2
 
 checkpoint:

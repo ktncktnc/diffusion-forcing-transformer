@@ -29,7 +29,9 @@ augmentation:
 
 latent:
   num_channels: 32
-
+external_cond_dim: 0
+external_cond_processing: mask_first
+external_cond_stack: false
 
 # num_eval_videos: 6144
 # subdataset_size: 3840

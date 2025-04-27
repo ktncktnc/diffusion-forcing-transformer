@@ -15,8 +15,7 @@ from lightning.pytorch.strategies.ddp import DDPStrategy
 
 import lightning.pytorch as pl
 from lightning.pytorch.loggers.wandb import WandbLogger
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, TQDMProgressBar
 from omegaconf import DictConfig
 
 from utils.print_utils import cyan
@@ -116,7 +115,10 @@ class BaseLightningExperiment(BaseExperiment):
         self.data_module = self.data_module_cls(root_cfg, self.compatible_datasets)
 
     def _build_common_callbacks(self):
-        return [EMA(**self.cfg.ema)]
+        return [
+            EMA(**self.cfg.ema),
+            TQDMProgressBar(refresh_rate=200)
+        ]
 
     def training(self) -> None:
         """

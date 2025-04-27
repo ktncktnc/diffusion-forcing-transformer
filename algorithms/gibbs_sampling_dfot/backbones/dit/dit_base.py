@@ -200,7 +200,7 @@ class DiTBase(nn.Module):
             return checkpoint(module, *args, use_reentrant=False)
         return module(*args)
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, c: torch.Tensor, attn_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Forward pass of the DiTBase model.
         Args:
@@ -259,6 +259,7 @@ class DiTBase(nn.Module):
                 else:
                     img_states["x"] = img_result
 
+        # Positional embedding, not needed for Rope
         if self.is_pos_emb_absolute_once:
             execute_in_parallel(lambda x, c, batch_size: self.pos_emb(x))
         if self.is_pos_emb_absolute_factorized and not self.is_factorized:
@@ -275,6 +276,7 @@ class DiTBase(nn.Module):
 
             execute_in_parallel(add_pos_emb)
 
+        # Reshape if using separate spatial and temporal attn
         if self.is_factorized:
             execute_in_parallel(
                 lambda x, c, batch_size: rearrange_contiguous_many(
@@ -287,9 +289,17 @@ class DiTBase(nn.Module):
         for i, (block, temporal_block) in enumerate(
             zip(self.blocks, self.temporal_blocks or [None for _ in range(self.depth)])
         ):
-            execute_in_parallel(lambda x, c, batch_size: self.checkpoint(block, x, c))
+            # Spatial attention without attention mask in case of factorized attention
+            if self.is_factorized:
+                execute_in_parallel(lambda x, c, batch_size: self.checkpoint(block, x, c))
+            # Spatial attention with optional attention mask
+            else:
+                execute_in_parallel(
+                    lambda x, c, batch_size: self.checkpoint(block, x, c, attn_mask)
+                )
 
             if self.is_factorized:
+                # Temporal attention if using factorized attention
                 execute_in_parallel(
                     lambda x, c, batch_size: rearrange_contiguous_many(
                         (x, c), "(b t) p c -> (b p) t c", b=batch_size
@@ -300,13 +310,14 @@ class DiTBase(nn.Module):
                         lambda x, c, batch_size: self.temporal_pos_emb(x)
                     )
                 execute_in_parallel(
-                    lambda x, c, batch_size: self.checkpoint(temporal_block, x, c)
+                    lambda x, c, batch_size: self.checkpoint(temporal_block, x, c, attn_mask)
                 )
                 execute_in_parallel(
                     lambda x, c, batch_size: rearrange_contiguous_many(
                         (x, c), "(b p) t c -> (b t) p c", b=batch_size
                     )
                 )
+        # Reshape back to (B, T, P, C) if using factorized attention
         if self.is_factorized:
             execute_in_parallel(
                 lambda x, c, batch_size: rearrange_contiguous_many(

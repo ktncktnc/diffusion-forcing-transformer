@@ -48,7 +48,7 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         self.rope = rope
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         B, N, C = x.shape
         qkv = (
             self.qkv(x)
@@ -61,7 +61,10 @@ class Attention(nn.Module):
         if self.rope is not None:
             q = self.rope(q)
             k = self.rope(k)
-
+        
+        if len(attn_mask.shape) < len(q.shape):
+            attn_mask = attn_mask.unsqueeze(1).repeat(1, self.num_heads, 1, 1)
+            
         if self.fused_attn:
             # pylint: disable-next=not-callable
             x = F.scaled_dot_product_attention(
@@ -69,6 +72,7 @@ class Attention(nn.Module):
                 k,
                 v,
                 dropout_p=self.attn_drop.p if self.training else 0.0,
+                attn_mask=attn_mask
             )
         else:
             q = q * self.scale
@@ -193,7 +197,7 @@ class DiTBlock(nn.Module):
         if self.use_mlp:
             self.mlp.apply(_basic_init)
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor):
+    def forward(self, x: torch.Tensor, c: torch.Tensor, attn_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Forward pass of the DiT block.
         In original implementation, conditioning is uniform across all tokens in the sequence. Here, we extend it to support token-wise conditioning (e.g. noise level can be different for each token).
@@ -202,7 +206,7 @@ class DiTBlock(nn.Module):
             c: Conditioning tensor of shape (B, N, C).
         """
         x, gate_msa = self.norm1(x, c)
-        x = x + gate_msa * self.attn(x)
+        x = x + gate_msa * self.attn(x, attn_mask=attn_mask)
         if self.use_mlp:
             x, gate_mlp = self.norm2(x, c)
             x = x + gate_mlp * self.mlp(x)

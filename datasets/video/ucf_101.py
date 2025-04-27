@@ -113,6 +113,7 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
         with open(os.path.join(self.save_dir, f"{split}03.json"), "r") as f:
             video_list = json.load(f)
             video_paths = [(self.save_dir / v['video_path'].replace('datasets/ucf101/', '')) for v in video_list]
+            labels = [v['label'] for v in video_list]
 
         dl: torch.utils.data.DataLoader = torch.utils.data.DataLoader(
             _VideoTimestampsDataset(video_paths),
@@ -137,6 +138,7 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
 
         metadata = {
             "video_paths": video_paths,
+            "labels": labels,
             "video_pts": video_pts,
             "video_fps": video_fps,
         }
@@ -296,9 +298,11 @@ class UCF101AdvancedVideoDataset(
         return video
 
     def load_cond(
-        self, video_metadata: Dict[str, Any], start_frame: int, end_frame: int
+        self, video_idx: int
     ) -> torch.Tensor:
-        raise NotImplementedError("ucf-101 only supports unconditional models")
+        return torch.tensor(
+            self.metadata[video_idx]['labels'], dtype=torch.long
+        ).unsqueeze(0)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         video_idx, clip_idx = self.get_clip_location(idx)
@@ -313,16 +317,18 @@ class UCF101AdvancedVideoDataset(
         # do not load video if we are training with latents
         if self.use_preprocessed_latents and self.split == "training":
             if self.external_cond_dim > 0:
-                cond = self.load_cond(video_metadata, start_frame, end_frame)
+                cond = self.load_cond(video_idx)
         else:
             if self.external_cond_dim > 0:
                 # load video together with condition
-                video, cond = self.load_video_and_cond(
-                    video_metadata, start_frame, end_frame
-                )
+                video = self.load_video(video_metadata, start_frame, end_frame)
+                cond = self.load_cond(video_idx)
             else:
                 # load video only
                 video = self.load_video(video_metadata, start_frame, end_frame)
+
+        if cond is not None:
+            cond = cond.expand(self.n_frames, -1)
 
         lens = [len(x) for x in (video, cond, latent) if x is not None]
         assert len(set(lens)) == 1, "video, cond, latent must have the same length"
@@ -348,7 +354,7 @@ class UCF101AdvancedVideoDataset(
             cond = self._process_external_cond(cond)
 
         augmented_video = self._augment(video) if video is not None else None
-
+        
         output = {
             "videos": self.transform(video) if video is not None else None,
             "augmented_videos": self.transform(augmented_video) if augmented_video is not None else None,

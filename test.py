@@ -1,41 +1,18 @@
-from algorithms.dfot.backbones.dit.dit3d import DiT3D
-from omegaconf import OmegaConf
-import torch
-# name: dit3d 
-# variant: full
-# pos_emb_type: rope_3d
-# patch_size: 2
-# hidden_size: 384
-# depth: 12
-# num_heads: 6
-# mlp_ratio: 4.0
-# use_gradient_checkpointing: False
-
-cfg = OmegaConf.create({
-    "name": "dit3d",
-    "variant": "full",
-    "pos_emb_type": "rope_3d",
-    "patch_size": 2,
-    "hidden_size": 384,
-    "depth": 12,
-    "num_heads": 6,
-    "mlp_ratio": 4.0,
-    "use_gradient_checkpointing": False
-})
 import torch
 
-model = DiT3D(
-    cfg,
-    x_shape=torch.Size([3, 64, 64]),
-    max_tokens=512,
-    external_cond_dim=0,
-    use_causal_mask=False
-)
+def generate_gibbs_attention_mask(n_frames: int, n_tokens_per_frame: int, frame_idx) -> torch.Tensor:
+    """
+    Generate a Gibbs attention mask for the given number of frames and tokens per frame.
+    Args:
+        n_frames: Number of frames.
+        n_tokens_per_frame: Number of tokens per frame. In case of factorized attention, n_tokens_per_frame = 1
+    Returns:
+        A tensor representing the attention mask.
+    """
+    # Create a mask with shape (n_frames, n_tokens_per_frame, n_tokens_per_frame)
+    mask = torch.ones((n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device='cpu')
+    mask[frame_idx*n_tokens_per_frame:(frame_idx+1)*n_tokens_per_frame, frame_idx*n_tokens_per_frame:(frame_idx+1)*n_tokens_per_frame] = 0
+    return mask
 
-print(model)
-
-x = torch.randn(1, 8, 3, 64, 64)
-noise_level = torch.randn(1,8)
-
-out = model(x, noise_level)
-print(out.shape)
+mask = generate_gibbs_attention_mask(4, 2, 1)
+print(mask)

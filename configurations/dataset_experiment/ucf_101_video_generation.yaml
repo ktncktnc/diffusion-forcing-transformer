@@ -10,14 +10,15 @@ defaults:
   - ../algorithm@algorithm.vae: dc_ae_preprocessor
 
 dataset:
-  num_eval_videos: 6144
+  num_eval_videos: 1000
   subdataset_size: null
   latent:
     enable: True
     suffix: 9da18dcf
-    type: pre_sample
+    type: online
 
 algorithm:
+  num_sanity_val_steps: 1
   lr_scheduler:
     num_warmup_steps: 10000
   weight_decay: 0
@@ -51,15 +52,17 @@ experiment:
       shuffle: True
     checkpointing:
       every_n_train_steps: 30001
+      every_n_epochs: null
       save_last: True
       save_top_k: 5
       monitor: "prediction/fvd"
   validation:
     batch_size: 16
     val_every_n_step: 30000
+    val_every_n_epoch: null
     data:
       num_workers: 1
-    limit_batch: 20
+    limit_batch: 50
   test:
     batch_size: 16
     data:
