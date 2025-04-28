@@ -196,14 +196,23 @@ def run_slurm(cfg: DictConfig):
         "for you to trace the errors and outputs: (Ctrl + C to exit without waiting)"
     )
     msg = f"tail -f {slurm_log_dir}/* \n"
-    try:
-        while not list(slurm_log_dir.glob("*.out")) and not list(
-            slurm_log_dir.glob("*.err")
-        ):
-            time.sleep(1)
-        print(cyan("To trace the outputs and errors, run the following command:"), msg)
-    except KeyboardInterrupt:
-        print("Keyboard interrupt detected. Exiting...")
+
+    if cfg.cluster.waiting_for_job:
+        try:
+            while not list(slurm_log_dir.glob("*.out")) and not list(
+                slurm_log_dir.glob("*.err")
+            ):
+                time.sleep(1)
+            print(cyan("To trace the outputs and errors, run the following command:"), msg)
+        except KeyboardInterrupt:
+            print("Keyboard interrupt detected. Exiting...")
+            print(
+                cyan(
+                    "To trace the outputs and errors, manually wait for the job to start and run the following command:"
+                ),
+                msg,
+            )
+    else:
         print(
             cyan(
                 "To trace the outputs and errors, manually wait for the job to start and run the following command:"
