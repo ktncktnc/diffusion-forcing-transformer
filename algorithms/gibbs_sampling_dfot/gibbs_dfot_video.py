@@ -1284,7 +1284,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         for m in range(scheduling_matrix.shape[0] - 1):
             from_noise_levels = scheduling_matrix[m]
             to_noise_levels = scheduling_matrix[m + 1]
-            frame_idx = ((from_noise_levels - to_noise_levels) == 0).nonzero(
+            frame_idx = ((from_noise_levels[0] - to_noise_levels[0]) == 0).nonzero(
                 as_tuple=False
             )[0]
             frame_idx = repeat(frame_idx, 't -> (b t)', b=batch_size)

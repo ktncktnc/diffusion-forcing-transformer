@@ -58,7 +58,7 @@ experiment:
       monitor: "prediction/fvd"
   validation:
     batch_size: 16
-    val_every_n_step: 30000
+    val_every_n_step: 25000
     val_every_n_epoch: null
     data:
       num_workers: 1

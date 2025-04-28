@@ -600,7 +600,6 @@ class HistoryGuidance:
 
     def __init__(
         self,
-        output_dir: str,
         hist_segments: List[HistorySegment],
         hist_weights: List[float],
         gen_segments: Optional[List[List[int] | ALLType]] = None,
@@ -620,7 +619,7 @@ class HistoryGuidance:
             len(hist_segments), disabled=not visualize
         )
         self._check_attributes()
-        self.output_dir = output_dir
+        self.output_dir = '/scratch/s224075134/temporal_diffusion/diffusion-forcing-transformer/output'
 
     def _check_attributes(self):
         """Check if the attributes are valid."""
@@ -672,7 +671,7 @@ class HistoryGuidance:
 
     @classmethod
     def from_config(
-        cls, output_dir: str, config: DictConfig, timesteps: int = 1000
+        cls, config: DictConfig, timesteps: int = 1000
     ) -> "HistoryGuidance":
         """
         Initialize the history guidance from a configuration.
@@ -682,7 +681,7 @@ class HistoryGuidance:
         """
         config = OmegaConf.to_container(config, resolve=True)
         name = config.pop("name")
-        return getattr(cls, name)(**config, output_dir=output_dir, timesteps=timesteps)
+        return getattr(cls, name)(**config, timesteps=timesteps)
 
     # -----Existing sampling techniques as special cases of history guidance-----
 

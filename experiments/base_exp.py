@@ -110,8 +110,8 @@ class BaseLightningExperiment(BaseExperiment):
         ckpt_path: Optional[Union[str, pathlib.Path]] = None,
     ) -> None:
         super().__init__(root_cfg, logger, ckpt_path)
-        from pprint import pprint
-        pprint(self.root_cfg)
+        import pprint
+        pprint.pp(self.root_cfg)
         self.data_module = self.data_module_cls(root_cfg, self.compatible_datasets)
 
     def _build_common_callbacks(self):

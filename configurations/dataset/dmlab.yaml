@@ -1,7 +1,7 @@
 defaults:
   - base_video
 
-save_dir: /weka/s224075134/temporal_diffusion/datasets/video/dmlab
+save_dir: /scratch/s224075134/temporal_diffusion/datasets/video/dmlab
 max_frames: 32
 frame_skip: 1
 external_cond_stack: true
