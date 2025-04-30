@@ -42,10 +42,10 @@ experiment:
     enable: True
     decay: 0.999
   training:
-    max_steps: -1
-    max_epochs: 10
+    max_steps: 200000
+    max_epochs: null
     lr: 1e-4
-    batch_size: 16
+    batch_size: 32
     data:
       num_workers: 11
       shuffle: True

@@ -369,8 +369,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         # 1. If running validation while training a model, directly evaluate
         # the denoising performance to detect overfitting, etc.
         # Logs the "denoising_vis" visualization as well as "validation/loss" metric.
-        if self.trainer.state.fn == "FIT":
-            self._eval_denoising(batch, batch_idx, namespace=namespace)
+        self._eval_denoising(batch, batch_idx, namespace=namespace)
 
         # 2. Sample all videos (based on the specified tasks)
         # and log the generated videos and metrics.
