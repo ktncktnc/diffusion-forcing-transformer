@@ -43,10 +43,10 @@ experiment:
     enable: True
     decay: 0.999
   training:
-    max_steps: -1
-    max_epochs: 10
+    max_steps: 400000
+    max_epochs: null
     lr: 1e-4
-    batch_size: 16
+    batch_size: 32
     data:
       num_workers: 11
       shuffle: True
@@ -57,14 +57,14 @@ experiment:
       save_top_k: 5
       monitor: "prediction/fvd"
   validation:
-    batch_size: 16
+    batch_size: 32
     val_every_n_step: 25000
     val_every_n_epoch: null
     data:
       num_workers: 1
     limit_batch: 50
   test:
-    batch_size: 16
+    batch_size: 32
     data:
       num_workers: 1
     limit_batch: 1.0
