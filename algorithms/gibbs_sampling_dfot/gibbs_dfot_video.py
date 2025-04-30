@@ -897,6 +897,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
                     order = torch.randperm(n_tokens, device=xs.device)
                     frame_idx.append(order[number_frames[i]].item())
                     noise_levels[i][order[:number_frames[i]]] = noise_levels[i][0] - noise_skip[i]
+                frame_idx = torch.tensor(frame_idx, device=xs.device)
             case "random_uniform":  # uniform noise levels (Typical Video Diffusion)
                 noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
 
