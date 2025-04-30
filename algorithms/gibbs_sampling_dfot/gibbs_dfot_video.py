@@ -317,7 +317,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         """Training step"""
         xs, conditions, masks, *_ = batch
 
-        if self.cfg.noise_level == "gibbs":
+        if self.cfg.noise_level in ["gibbs", "random_gibbs"]:
             noise_levels, frame_idx, masks = self._get_training_noise_levels(xs, masks)
         else:
             noise_levels, masks = self._get_training_noise_levels(xs, masks)
@@ -889,6 +889,15 @@ class GibbsDFoTVideo(BasePytorchAlgo):
                     noise_levels[i, : frame_idx[i]] = (
                         noise_levels[i, : frame_idx[i]] - noise_skip[i]
                     ).clamp(0)
+            case "random_gibbs":
+                noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
+                number_frames = torch.randint(0, n_tokens, (batch_size,), device=xs.device)
+                noise_skip = torch.randint(self.cfg.diffusion.min_noise_skip, self.cfg.diffusion.max_noise_skip, (batch_size,), device=xs.device)
+                frame_idx = []
+                for i in range(batch_size):
+                    order = torch.randperm(n_tokens, device=xs.device)
+                    frame_idx.append(order[number_frames[i]].item())
+                    noise_levels[i][order[:number_frames[i]]] = noise_levels[i][0] - noise_skip[i]
             case "random_uniform":  # uniform noise levels (Typical Video Diffusion)
                 noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
 
@@ -936,7 +945,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         #     )
         #     masks = torch.where(context_mask, False, masks)
 
-        if self.cfg.noise_level == 'gibbs':
+        if self.cfg.noise_level in ['gibbs', 'random_gibbs']:
             return noise_levels, frame_idx, masks
 
         return noise_levels, masks
@@ -962,7 +971,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         padding: int = 0,
     ):
         match self.cfg.scheduling_matrix:
-            case "full_sequence" | "gibbs":
+            case "full_sequence" | "gibbs" | "random_gibbs":
                 scheduling_matrix = np.arange(self.sampling_timesteps, -1, -1)[
                     :, None
                 ].repeat(horizon, axis=1)
@@ -984,6 +993,18 @@ class GibbsDFoTVideo(BasePytorchAlgo):
                 for j in range(horizon):
                     scheduling_matrix[i * horizon + j, j+1:] = scheduling_matrix[(i-1) * horizon + horizon - 1, j+1:]
 
+        elif self.cfg.scheduling_matrix == "random_gibbs":
+            n_sampling_steps = scheduling_matrix.shape[0]
+            scheduling_matrix = repeat(scheduling_matrix, 't b -> (t h) b', h=horizon)
+
+            for i in range(1, n_sampling_steps):
+                frame_orders = torch.randperm(horizon, device=scheduling_matrix.device)
+                frames = []
+                for j in range(horizon):
+                    frames = frame_orders[j+1:].cpu().numpy().tolist()
+                    for f in frames:
+                        scheduling_matrix[i * horizon + j, f] = scheduling_matrix[(i-1) * horizon + horizon - 1, 0].item()
+        
         # paded entries are labeled as pure noise
         scheduling_matrix = F.pad(
             scheduling_matrix, (0, padding, 0, 0), value=self.timesteps - 1
@@ -1211,14 +1232,8 @@ class GibbsDFoTVideo(BasePytorchAlgo):
 
         horizon = length if self.use_causal_mask else self.max_tokens
         padding = horizon - length
+        
         # create initial xs_pred with noise
-        # xs_pred = torch.randn(
-        #     (batch_size, 1, *x_shape),
-        #     device=self.device,
-        #     generator=self.generator,
-        # )
-        # xs_pred = torch.repeat_interleave(
-        #     xs_pred, horizon, dim=1)
         xs_pred = torch.randn(
             (batch_size, horizon, *x_shape),
             device=self.device,
@@ -1258,6 +1273,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
             horizon - padding,
             padding,
         )
+
         scheduling_matrix = scheduling_matrix.to(self.device)
         scheduling_matrix = repeat(scheduling_matrix, "m t -> m b t", b=batch_size)
         # fill context tokens' noise levels as -1 in scheduling matrix

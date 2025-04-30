@@ -9,4 +9,7 @@ python -m main '+name=UCF_101_dit3d' 'dataset=ucf_101' 'algorithm=contrastive_df
 
 python -m main +name=single_image_to_short dataset=realestate10k_mini algorithm=dfot_video_pose experiment=video_generation @diffusion/continuous load=pretrained:DFoT_RE10K.ckpt 'experiment.tasks=[validation]' experiment.validation.data.shuffle=True dataset.context_length=1 dataset.frame_skip=20 dataset.n_frames=8 experiment.validation.batch_size=1 algorithm.tasks.prediction.history_guidance.name=vanilla +algorithm.tasks.prediction.history_guidance.guidance_scale=4.0 dataset.max_frames=4 wandb.mode=disabled
 
+
+python -m main +name=single_image_to_short dataset=ucf_101 algorithm=gibbs_dfot_video experiment=video_generation @DiT/B load= 'experiment.tasks=[validation]' experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=2 algorithm.tasks.prediction.history_guidance.name=conditional wandb.mode=disabled
+
 python -m main +name=Preprocessing_UCF101 dataset=ucf101 algorithm=dc_ae_preprocessor experiment=video_latent_preprocessing

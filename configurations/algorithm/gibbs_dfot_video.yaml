@@ -37,7 +37,7 @@ variable_context:
   dropout: 0
 # sampling scheme
 chunk_size: -1
-scheduling_matrix: full_sequence
+scheduling_matrix: gibbs
 replacement: noisy_scale
 
 diffusion:
@@ -47,7 +47,7 @@ diffusion:
   schedule_fn_kwargs:
     shift: 1.0
   use_causal_mask: False
-  max_noise_skip: 25
+  max_noise_skip: 30
   min_noise_skip: 1
   clip_noise: 20.0
   # training
