@@ -163,8 +163,7 @@ class DiT3D(BaseBackbone):
             A tensor representing the attention mask.
         """
         # Create a mask with shape (n_frames, n_tokens_per_frame, n_tokens_per_frame)
-        mask = torch.ones((n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device=device)
-        mask = repeat(mask, "h w -> b h w", b=frame_idx.shape[0])
+        mask = torch.ones((frame_idx.shape[0], n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device=device)
         for i in range(len(frame_idx)):
             mask[i, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
         return mask
