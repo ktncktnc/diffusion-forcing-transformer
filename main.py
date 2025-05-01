@@ -93,6 +93,8 @@ def run_local(cfg: DictConfig):
             if k != "mode"
         }
         tags = [cfg.experiment._name, cfg.dataset._name, cfg.algorithm._name, f"eval_scheduling_matrix:{cfg.algorithm.scheduling_matrix}", f"train_noise_level:{cfg.algorithm.noise_level}"] + cfg.experiment.tasks\
+        if cfg.algorithm._name.startswith('gibbs'):
+            tags.append(f"self_attn_mask:{cfg.algorithm.backbone.self_attn_mask}")
         # add cfg.algorithm.backbone.name if it exists
         if hasattr(cfg.algorithm, "backbone") and hasattr(cfg.algorithm.backbone, "name"):
             tags.append(cfg.algorithm.backbone.name)

@@ -61,7 +61,8 @@ diffusion:
   ddim_sampling_eta: 0.0
   # (For full sequence diffusion)
   reconstruction_guidance: 0.0
-
+backbone:
+  self_attn_mask: diagonal_gibbs # diagonal_gibbs, gibbs, diagonal, full
 # vae
 vae:
   pretrained_path: null

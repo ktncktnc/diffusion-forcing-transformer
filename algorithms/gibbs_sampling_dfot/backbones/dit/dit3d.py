@@ -164,6 +164,17 @@ class DiT3D(BaseBackbone):
         """
         # Create a mask with shape (n_frames, n_tokens_per_frame, n_tokens_per_frame)
         mask = torch.ones((frame_idx.shape[0], n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device=device)
-        for i in range(len(frame_idx)):
-            mask[i, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
+        match self.cfg.self_attn_mask:
+            case "diagonal_gibbs":
+                for i in range(len(frame_idx)):
+                    mask[i, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
+            case "gibbs":
+                for i in range(len(frame_idx)):
+                    mask[i, :, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
+            case "diagonal":
+                for i in range(len(frame_idx)):
+                    mask[:, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
+            case "full":
+                pass
+
         return mask
