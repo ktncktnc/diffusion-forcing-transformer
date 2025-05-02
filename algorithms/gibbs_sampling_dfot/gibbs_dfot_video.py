@@ -323,6 +323,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
 
         if self.cfg.noise_level in ["gibbs", "random_gibbs"]:
             noise_levels, frame_idx, masks = self._get_training_noise_levels(xs, masks)
+            context_mask, noise_levels = self._generate_context_mask(xs, noise_levels, frame_idx, masks)
         else:
             noise_levels, masks = self._get_training_noise_levels(xs, masks)
             frame_idx = None
@@ -843,6 +844,22 @@ class GibbsDFoTVideo(BasePytorchAlgo):
     # Training Utils
     # ---------------------------------------------------------------------
 
+    def _generate_context_mask(
+            self, xs: Tensor, noise_levels, frame_idx, masks
+    ):
+        batch_size, n_frames = xs.shape[:2]
+        context_mask = torch.rand((batch_size, n_frames), device=xs.device) < self.cfg.clean_context_ratio
+        context_mask[torch.arange(batch_size), frame_idx] = 0
+        context_mask = context_mask.logical_and(masks.bool())
+
+        # Fill the context mask with the noise levels
+        noise_levels = torch.where(
+            context_mask,
+            -1,
+            noise_levels,
+        )
+        return context_mask, noise_levels
+
     def _get_training_noise_levels(
         self, xs: Tensor, masks: Tensor = None
     ) -> Tuple[Tensor, Tensor]:
@@ -860,47 +877,31 @@ class GibbsDFoTVideo(BasePytorchAlgo):
             generator=self.generator,
         )
 
-        # baseline training (SD: fixed_context, BD: variable_context)
-        context_mask = None
-        # if self.cfg.variable_context.enabled:
-        #     assert (
-        #         not self.cfg.fixed_context.enabled
-        #     ), "Cannot use both fixed and variable context"
-        #     context_mask = bernoulli_tensor(
-        #         (batch_size, n_tokens),
-        #         self.cfg.variable_context.prob,
-        #         device=self.device,
-        #         generator=self.generator,
-        #     ).bool()
-        # elif self.cfg.fixed_context.enabled:
-        #     context_indices = self.cfg.fixed_context.indices or list(
-        #         range(self.n_context_tokens)
-        #     )
-        #     context_mask = torch.zeros(
-        #         (batch_size, n_tokens), dtype=torch.bool, device=xs.device
-        #     )
-        #     context_mask[:, context_indices] = True
-
         match self.cfg.noise_level:
             case "random_independent":  # independent noise levels (Diffusion Forcing)
                 noise_levels = rand_fn((batch_size, n_tokens))
             case "gibbs":
                 noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
-                # random frame index
-                frame_idx = torch.randint(0, n_tokens, (batch_size,), device=xs.device)
+                frame_idx = []
                 # frame 0 to frame_idx - 1 will be minus 1
                 noise_skip = torch.randint(self.cfg.diffusion.min_noise_skip, self.cfg.diffusion.max_noise_skip, (batch_size,), device=xs.device)
                 for i in range(batch_size):
-                    noise_levels[i, : frame_idx[i]] = (
-                        noise_levels[i, : frame_idx[i]] - noise_skip[i]
+                    available_frames = masks[i].nonzero()[:, 0]
+                    idx = available_frames[np.random.randint(0, len(available_frames))].item()
+                    frame_idx.append(idx)
+                    # later will fill noise_levels self.timesteps - 1 with masking
+                    noise_levels[i, : idx] = (
+                        noise_levels[i, : idx] - noise_skip[i]
                     ).clamp(0)
+                frame_idx = torch.tensor(frame_idx, device=xs.device)
             case "random_gibbs":
                 noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
                 number_frames = torch.randint(0, n_tokens, (batch_size,), device=xs.device)
                 noise_skip = torch.randint(self.cfg.diffusion.min_noise_skip, self.cfg.diffusion.max_noise_skip, (batch_size,), device=xs.device)
                 frame_idx = []
                 for i in range(batch_size):
-                    order = torch.randperm(n_tokens, device=xs.device)
+                    available_frames = masks[i].nonzero()[:, 0]
+                    order = available_frames[torch.randperm(len(available_frames), device=xs.device)]
                     frame_idx.append(order[number_frames[i]].item())
                     noise_levels[i][order[:number_frames[i]]] = noise_levels[i][0] - noise_skip[i]
                 frame_idx = torch.tensor(frame_idx, device=xs.device)
@@ -921,35 +922,6 @@ class GibbsDFoTVideo(BasePytorchAlgo):
                 1 if self.cfg.diffusion.is_continuous else self.timesteps - 1,
             ),
         )
-
-        # if context_mask is not None:
-        #     # binary dropout training to enable guidance
-        #     dropout = (
-        #         (
-        #             self.cfg.variable_context
-        #             if self.cfg.variable_context.enabled
-        #             else self.cfg.fixed_context
-        #         ).dropout
-        #         if self.trainer.training
-        #         else 0.0
-        #     )
-        #     context_noise_levels = bernoulli_tensor(
-        #         (batch_size, 1),
-        #         dropout,
-        #         device=xs.device,
-        #         generator=self.generator,
-        #     )
-        #     if not self.cfg.diffusion.is_continuous:
-        #         context_noise_levels = context_noise_levels.long() * (
-        #             self.timesteps - 1
-        #         )
-        #     noise_levels = torch.where(context_mask, context_noise_levels, noise_levels)
-
-        #     # modify masks to exclude context frames from loss computation
-        #     context_mask = rearrange(
-        #         context_mask, "b t -> b t" + " 1" * len(masks.shape[2:])
-        #     )
-        #     masks = torch.where(context_mask, False, masks)
 
         if self.cfg.noise_level in ['gibbs', 'random_gibbs']:
             return noise_levels, frame_idx, masks

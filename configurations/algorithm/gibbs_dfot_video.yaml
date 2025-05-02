@@ -45,6 +45,7 @@ backbone:
 # sampling scheme
 chunk_size: -1
 scheduling_matrix: gibbs
+clean_context_ratio: 0.2
 replacement: noisy_scale
 
 
