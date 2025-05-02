@@ -62,7 +62,7 @@ class Attention(nn.Module):
             q = self.rope(q)
             k = self.rope(k)
         
-        if len(attn_mask.shape) < len(q.shape):
+        if attn_mask is not None and len(attn_mask.shape) < len(q.shape):
             attn_mask = attn_mask.unsqueeze(1).repeat(1, self.num_heads, 1, 1)
             
         if self.fused_attn:

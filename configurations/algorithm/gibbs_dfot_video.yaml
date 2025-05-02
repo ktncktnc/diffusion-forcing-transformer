@@ -33,14 +33,15 @@ variable_context:
   enabled: false
   prob: 0
   dropout: 0
-gibbs:
-  enabled: true
-  mask_type: null 
-  # bert: mask input tokens, 
-  # diagonal_gibbs: only mask the diagonal of the input self attention
-  # full_gibbs: mask whole columns of the input self attention
-  # diagonal: mask the diagonal of the input self attention
-  # null: no masking
+backbone:
+  gibbs:
+    enabled: true
+    mask_type: null 
+    # bert: mask input tokens, 
+    # diagonal_gibbs: only mask the diagonal of the input self attention
+    # full_gibbs: mask whole columns of the input self attention
+    # diagonal: mask the diagonal of the input self attention
+    # null: no masking
 # sampling scheme
 chunk_size: -1
 scheduling_matrix: gibbs
