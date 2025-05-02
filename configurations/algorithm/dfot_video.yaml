@@ -14,9 +14,6 @@ context_frames: ${dataset.context_length}
 latent: ${dataset.latent}
 data_mean: ${dataset.data_mean}
 data_std: ${dataset.data_std}
-external_cond_dim: ${dataset.external_cond_dim}
-external_cond_stack: ${dataset.external_cond_stack}
-external_cond_processing: ${dataset.external_cond_processing}
 # training hyperparameters
 compile: False
 weight_decay: 1e-3

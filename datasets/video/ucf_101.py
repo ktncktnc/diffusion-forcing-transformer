@@ -327,11 +327,8 @@ class UCF101AdvancedVideoDataset(
                 # load video only
                 video = self.load_video(video_metadata, start_frame, end_frame)
 
-        if cond is not None:
-            cond = cond.expand(self.n_frames, -1)
-
-        lens = [len(x) for x in (video, cond, latent) if x is not None]
-        assert len(set(lens)) == 1, "video, cond, latent must have the same length"
+        lens = [len(x) for x in (video, latent) if x is not None]
+        assert len(set(lens)) == 1, "video, latent must have the same length"
         pad_len = self.n_frames - lens[0]
 
         nonterminal = torch.ones(self.n_frames, dtype=torch.bool)

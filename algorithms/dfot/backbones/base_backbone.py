@@ -7,6 +7,7 @@ from .modules.embeddings import (
     StochasticTimeEmbedding,
     RandomDropoutCondEmbedding,
 )
+from diffusers.models.embeddings import LabelEmbedding
 
 
 class BaseBackbone(ABC, nn.Module):
@@ -15,6 +16,8 @@ class BaseBackbone(ABC, nn.Module):
         cfg: DictConfig,
         x_shape: torch.Size,
         max_tokens: int,
+        external_cond_type: str,
+        external_cond_num_classes: int,  # only for label
         external_cond_dim: int,
         use_causal_mask=True,
     ):
@@ -22,6 +25,8 @@ class BaseBackbone(ABC, nn.Module):
         super().__init__()
 
         self.cfg = cfg
+        self.external_cond_type = external_cond_type
+        self.external_cond_num_classes = external_cond_num_classes
         self.external_cond_dim = external_cond_dim
         self.use_causal_mask = use_causal_mask
         self.x_shape = x_shape
@@ -34,15 +39,26 @@ class BaseBackbone(ABC, nn.Module):
         self.external_cond_embedding = self._build_external_cond_embedding()
 
     def _build_external_cond_embedding(self) -> Optional[nn.Module]:
-        return (
-            RandomDropoutCondEmbedding(
-                self.external_cond_dim,
+        if not self.external_cond_dim:
+            return None
+        
+        if self.external_cond_type == 'label':
+            return LabelEmbedding(
+                self.external_cond_num_classes,
                 self.external_cond_emb_dim,
                 dropout_prob=self.cfg.get("external_cond_dropout", 0.0),
             )
-            if self.external_cond_dim
-            else None
-        )
+        elif self.external_cond_type == 'action':
+            return RandomDropoutCondEmbedding(
+                    self.external_cond_dim,
+                    self.external_cond_emb_dim,
+                    dropout_prob=self.cfg.get("external_cond_dropout", 0.0),
+            )
+        else:
+            raise ValueError(
+                f"Unknown external condition type: {self.external_cond_type}. "
+                "Supported types are 'label' and 'action'."
+            )    
 
     @property
     def noise_level_dim(self):

@@ -175,6 +175,12 @@ class BaseLightningExperiment(BaseExperiment):
             reload_dataloaders_every_n_epochs=self.cfg.reload_dataloaders_every_n_epochs,
         )
 
+        # Check properties of the trainer
+        print(f"Accelerator: {trainer.accelerator}")
+        print(f"Device type: {trainer.accelerator.auto_device_count()}")
+        print(f"Devices: {trainer.device_ids}")
+        print(f"Strategy: {trainer.strategy}")
+
         # if self.debug:
         #     self.logger.watch(self.algo, log="all")
 

@@ -15,4 +15,6 @@ context_length: 12
 resolution: 256
 data_mean: [[[0.557]], [[0.222]], [[0.416]], [[-0.847]]]
 data_std: [[[4.268]], [[4.953]], [[5.722]], [[7.336]]]
+
+external_cond_type: action
 external_cond_dim: 4

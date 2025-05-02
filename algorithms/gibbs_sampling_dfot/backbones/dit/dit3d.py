@@ -15,6 +15,8 @@ class DiT3D(BaseBackbone):
         cfg: DictConfig,
         x_shape: torch.Size,
         max_tokens: int,
+        external_cond_type: str,
+        external_cond_num_classes: int, # only for label
         external_cond_dim: int,
         use_causal_mask=True,
     ):
@@ -27,6 +29,8 @@ class DiT3D(BaseBackbone):
             cfg,
             x_shape,
             max_tokens,
+            external_cond_type,
+            external_cond_num_classes,
             external_cond_dim,
             use_causal_mask,
         )
@@ -127,8 +131,9 @@ class DiT3D(BaseBackbone):
         x = rearrange(x, "b t c h w -> (b t) c h w")
         x = self.patch_embedder(x)
         x = rearrange(x, "(b t) p c -> b (t p) c", b=input_batch_size)
-        if gibbs_frame_idx is not None:
-            mask = self.generate_gibbs_attention_mask(
+        if self.cfg.gibbs.enabled:
+            x, mask = self.gibbs_preprocessing(
+                tokens=x,
                 n_frames=n_frames,
                 n_tokens_per_frame=self.num_patches,
                 frame_idx=gibbs_frame_idx,
@@ -140,7 +145,17 @@ class DiT3D(BaseBackbone):
         emb = self.noise_level_pos_embedding(noise_levels)
 
         if external_cond is not None:
-            emb = emb + self.external_cond_embedding(external_cond, external_cond_mask)
+            if self.external_cond_type == 'label':
+                cond_emb = self.external_cond_embedding(external_cond.long())
+                emb = emb + cond_emb
+            elif self.external_cond_type == 'action':
+                emb = emb + self.external_cond_embedding(external_cond, external_cond_mask)
+            else:
+                raise ValueError(
+                    f"Unknown external condition type: {self.external_cond_type}. "
+                    "Supported types are 'label' and 'action'."
+                )
+
         emb = repeat(emb, "b t c -> b (t p) c", p=self.num_patches)
 
         x = self.dit_base(x, emb, attn_mask=mask)  # (B, N, C)
@@ -153,7 +168,7 @@ class DiT3D(BaseBackbone):
         )  # (B, T, C, H, W)
         return x
 
-    def generate_gibbs_attention_mask(self, n_frames: int, n_tokens_per_frame: int, frame_idx, device) -> torch.Tensor:
+    def gibbs_preprocessing(self, tokens: torch.Tensor, n_frames: int, n_tokens_per_frame: int, frame_idx, device) -> torch.Tensor:
         """
         Generate a Gibbs attention mask for the given number of frames and tokens per frame.
         Args:
@@ -162,19 +177,49 @@ class DiT3D(BaseBackbone):
         Returns:
             A tensor representing the attention mask.
         """
-        # Create a mask with shape (n_frames, n_tokens_per_frame, n_tokens_per_frame)
-        mask = torch.ones((frame_idx.shape[0], n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device=device)
-        match self.cfg.self_attn_mask:
+        if not self.cfg.gibbs.enabled:
+            raise ValueError("Gibbs sampling is not enabled in the config.")
+
+        assert self.cfg.gibbs.enabled and frame_idx is not None, "Gibbs sampling is enabled but frame_idx is None."
+        
+        match self.cfg.gibbs.mask_type:
+            case None:
+                mask = None
+            case "bert":
+                tokens = rearrange(tokens, "b (t p) c -> b t p c", t=n_frames)
+                tokens[torch.arange(tokens.shape[0]), frame_idx] = 0
+                tokens = rearrange(tokens, "b t p c -> b (t p) c")
+                mask = None
             case "diagonal_gibbs":
+                mask = torch.ones((frame_idx.shape[0], n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device=device)
                 for i in range(len(frame_idx)):
                     mask[i, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
             case "gibbs":
+                mask = torch.ones((frame_idx.shape[0], n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device=device)
                 for i in range(len(frame_idx)):
                     mask[i, :, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
             case "diagonal":
+                mask = torch.ones((frame_idx.shape[0], n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device=device)
                 for i in range(len(frame_idx)):
                     mask[:, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
-            case "full":
-                pass
+            case _:
+                raise ValueError(f"Unknown mask type: {self.cfg.gibbs.mask_type}. Supported types are None, 'bert', 'diagonal_gibbs', 'gibbs', and 'diagonal'.")
+        
+        return tokens, mask
 
-        return mask
+        # # Create a mask with shape (n_frames, n_tokens_per_frame, n_tokens_per_frame)
+        # mask = torch.ones((frame_idx.shape[0], n_frames*n_tokens_per_frame, n_frames*n_tokens_per_frame), device=device)
+        # match self.cfg.self_attn_mask:
+        #     case "diagonal_gibbs":
+        #         for i in range(len(frame_idx)):
+        #             mask[i, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
+        #     case "gibbs":
+        #         for i in range(len(frame_idx)):
+        #             mask[i, :, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
+        #     case "diagonal":
+        #         for i in range(len(frame_idx)):
+        #             mask[:, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame, frame_idx[i]*n_tokens_per_frame:(frame_idx[i]+1)*n_tokens_per_frame] = 0
+        #     case "full":
+        #         pass
+
+        # return mask

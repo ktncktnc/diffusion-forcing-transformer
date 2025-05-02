@@ -1,0 +1,11 @@
+# Important: Be careful when modifying this file! 
+# The fields in file will be overridden by the dataset dependent config file in the `configurations/dataset_experiment` folder so consider making changes there instead! 
+
+defaults:
+  - ucf_101
+
+external_cond_type: label
+external_cond_num_classes: 101
+external_cond_dim: 1 # 0 if no external conditioning, 1 for label
+external_cond_processing: null
+external_cond_stack: false

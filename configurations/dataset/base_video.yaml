@@ -27,6 +27,8 @@ context_length: 4 # Number of frames to be used as context
 frame_skip: 1 # Stride for sampling frames
 filter_min_len: null # Only for validatio. filters out validation videos shorter than this cfg. A null value defaults to self.n_frames, and filter by its value otherwise 
 # External conditioning configuration
+external_cond_type: null # Type of external conditioning: label, action
+external_cond_num_classes: null
 external_cond_dim: 0 # Dimension of external conditioning, 0 if no external conditioning
 external_cond_stack: false # Whether to stack external conditioning across skipped frames
 external_cond_processing: null # How to process external conditioning

@@ -69,7 +69,7 @@ class StochasticTimeEmbedding(nn.Module):
         self,
         dim: int,
         time_embed_dim: int,
-        use_fourier: bool = False,
+        use_fourier: bool = False, # False for discrete timesteps, True for continuous
         p: float = 0.0,
     ):
         super().__init__()
@@ -296,6 +296,7 @@ class RandomEmbeddingDropout(nn.Module):
 
         if self.training and self.p > 0:
             mask = torch.rand(emb.shape[:1], device=emb.device) < self.p
+
         if mask is not None:
             mask = rearrange(mask, "... -> ..." + " 1" * (emb.ndim - 1))
             emb = torch.where(mask, torch.zeros_like(emb), emb)

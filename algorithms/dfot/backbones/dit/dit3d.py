@@ -15,6 +15,8 @@ class DiT3D(BaseBackbone):
         cfg: DictConfig,
         x_shape: torch.Size,
         max_tokens: int,
+        external_cond_type: str,
+        external_cond_num_classes: int, # only for label
         external_cond_dim: int,
         use_causal_mask=True,
     ):
@@ -27,6 +29,8 @@ class DiT3D(BaseBackbone):
             cfg,
             x_shape,
             max_tokens,
+            external_cond_type,
+            external_cond_num_classes,
             external_cond_dim,
             use_causal_mask,
         )
@@ -130,7 +134,17 @@ class DiT3D(BaseBackbone):
         emb = self.noise_level_pos_embedding(noise_levels)
 
         if external_cond is not None:
-            emb = emb + self.external_cond_embedding(external_cond, external_cond_mask)
+            if self.external_cond_type == 'label':
+                cond_emb = self.external_cond_embedding(external_cond.long())
+                emb = emb + cond_emb
+            elif self.external_cond_type == 'action':
+                emb = emb + self.external_cond_embedding(external_cond, external_cond_mask)
+            else:
+                raise ValueError(
+                    f"Unknown external condition type: {self.external_cond_type}. "
+                    "Supported types are 'label' and 'action'."
+                )
+            
         emb = repeat(emb, "b t c -> b (t p) c", p=self.num_patches)
 
         x = self.dit_base(x, emb)  # (B, N, C)

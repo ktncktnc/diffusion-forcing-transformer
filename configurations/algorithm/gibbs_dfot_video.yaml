@@ -14,9 +14,7 @@ context_frames: ${dataset.context_length}
 latent: ${dataset.latent}
 data_mean: ${dataset.data_mean}
 data_std: ${dataset.data_std}
-external_cond_dim: ${dataset.external_cond_dim}
-external_cond_stack: ${dataset.external_cond_stack}
-external_cond_processing: ${dataset.external_cond_processing}
+
 # training hyperparameters
 compile: False
 weight_decay: 1e-3
@@ -35,10 +33,19 @@ variable_context:
   enabled: false
   prob: 0
   dropout: 0
+gibbs:
+  enabled: true
+  mask_type: null 
+  # bert: mask input tokens, 
+  # diagonal_gibbs: only mask the diagonal of the input self attention
+  # full_gibbs: mask whole columns of the input self attention
+  # diagonal: mask the diagonal of the input self attention
+  # null: no masking
 # sampling scheme
 chunk_size: -1
 scheduling_matrix: gibbs
 replacement: noisy_scale
+
 
 diffusion:
   is_continuous: False
@@ -61,8 +68,7 @@ diffusion:
   ddim_sampling_eta: 0.0
   # (For full sequence diffusion)
   reconstruction_guidance: 0.0
-backbone:
-  self_attn_mask: diagonal_gibbs # diagonal_gibbs, gibbs, diagonal, full
+
 # vae
 vae:
   pretrained_path: null

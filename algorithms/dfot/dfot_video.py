@@ -38,6 +38,8 @@ class DFoTVideo(BasePytorchAlgo):
         self.x_shape = list(cfg.x_shape)
         self.frame_skip = cfg.frame_skip
         self.chunk_size = cfg.chunk_size
+        self.external_cond_type = cfg.external_cond_type
+        self.external_cond_num_classes = cfg.external_cond_num_classes
         self.external_cond_dim = cfg.external_cond_dim * (
             cfg.frame_skip if cfg.external_cond_stack else 1
         )
@@ -111,6 +113,8 @@ class DFoTVideo(BasePytorchAlgo):
                 backbone_cfg=self.cfg.backbone,
                 x_shape=self.x_shape,
                 max_tokens=self.max_tokens,
+                external_cond_type=self.external_cond_type,
+                external_cond_num_classes=self.external_cond_num_classes,
                 external_cond_dim=self.external_cond_dim,
             ),
             disable=not self.cfg.compile,
@@ -819,6 +823,8 @@ class DFoTVideo(BasePytorchAlgo):
         if conditions is None:
             return conditions
         match self.cfg.external_cond_processing:
+            case None:
+                return conditions
             case "mask_first":
                 mask = torch.ones_like(conditions)
                 mask[:, :1, : self.external_cond_dim] = 0

@@ -2,3 +2,8 @@ defaults:
   - base_algo # inherits from configurations/algorithm/base_algo.yaml
 
 lr: ${experiment.training.lr}
+external_cond_type: ${dataset.external_cond_type}
+external_cond_num_classes: ${dataset.external_cond_num_classes} # only for label conditioning
+external_cond_dim: ${dataset.external_cond_dim}
+external_cond_stack: ${dataset.external_cond_stack}
+external_cond_processing: ${dataset.external_cond_processing}

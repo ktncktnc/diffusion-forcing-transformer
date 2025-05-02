@@ -29,20 +29,10 @@ augmentation:
 
 latent:
   num_channels: 32
-external_cond_dim: 0
-external_cond_processing: mask_first
-external_cond_stack: false
+  downsampling_factor: [1, 8] 
+  enable: True
+  suffix: 9da18dcf
+  type: pre_9da18dcf
 
-# num_eval_videos: 6144
-# subdataset_size: 3840
-# latent:
-#   enable: False
-#   downsampling_factor: [1, 8] 
-#   suffix: null
-# external_cond_dim: 0
-# external_cond_stack: false # Whether to stack external conditioning across skipped frames
-# external_cond_processing: null # How to process external conditioning
-# # Data loading configuration
-# preload: false # Preload the dataset into CPU memory for faster data loading
-# num_eval_videos: null # Number of video clips to be used for evaluation, setting this ensures that evaluation clips are consistent across runs
-# frame_skip: 1 # Stride for sampling frames
+subdataset_size: null
+external_cond_dim: 0 # 0 if no external conditioning, 1 for label
