@@ -431,7 +431,17 @@ class GibbsDFoTVideo(BasePytorchAlgo):
 
         xs = xs[:, : self.max_tokens]
         if conditions is not None:
-            conditions = conditions[:, : self.max_tokens]
+            match self.external_cond_type:
+                case "label":
+                    conditions = conditions
+                case "action":
+                    conditions = conditions[:, : self.max_tokens]
+                case _:
+                    raise ValueError(
+                        f"Unknown external condition type: {self.external_cond_type}. "
+                        "Supported types are 'label' and 'action'."
+                    )
+                
         masks = masks[:, : self.max_tokens]
         if gt_videos is not None:
             gt_videos = gt_videos[:, : self.max_frames]
@@ -535,9 +545,19 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         keyframe_indices = torch.cat(
             [torch.arange(self.n_context_tokens), keyframe_indices]
         ).unique()  # context frames are always keyframes
-        key_conditions = (
-            conditions[:, keyframe_indices] if conditions is not None else None
-        )
+
+        match self.external_cond_type:
+            case "label":
+                key_conditions = conditions if conditions is not None else None
+            case "action":
+                key_conditions = (
+                conditions[:, keyframe_indices] if conditions is not None else None
+            )
+            case _:
+                raise ValueError(
+                    f"Unknown external condition type: {self.external_cond_type}. "
+                    "Supported types are 'label' and 'action'."
+                )
 
         # 1. Predict the keyframes
         xs_pred_key, *_ = self._predict_sequence(
@@ -695,9 +715,19 @@ class GibbsDFoTVideo(BasePytorchAlgo):
                     self._pad_to_max_tokens(context_mask[:, frames])
                 )
                 if conditions is not None:
-                    current_conditions.append(
-                        self._pad_to_max_tokens(conditions[:, frames])
-                    )
+                    match self.external_cond_type:
+                        case "label":
+                            current_conditions.append(conditions)
+                        case "action":
+                            current_conditions.append(
+                                self._pad_to_max_tokens(conditions[:, frames])
+                            )
+                        case _:
+                            raise ValueError(
+                                f"Unknown external condition type: {self.external_cond_type}. "
+                                "Supported types are 'label' and 'action'."
+                            )
+
             current_context, current_context_mask, current_conditions = map(
                 lambda y: torch.cat(y, 0) if y is not None else None,
                 (current_context, current_context_mask, current_conditions),
@@ -1097,7 +1127,16 @@ class GibbsDFoTVideo(BasePytorchAlgo):
             cond_len = l if self.use_causal_mask else self.max_tokens
             cond_slice = None
             if conditions is not None:
-                cond_slice = conditions[:, curr_token - c : curr_token - c + cond_len]
+                match self.external_cond_type:
+                    case "label":
+                        cond_slice = conditions
+                    case "action":
+                        cond_slice = conditions[:, curr_token - c : curr_token - c + cond_len]
+                    case _:
+                        raise ValueError(
+                            f"Unknown external condition type: {self.external_cond_type}. "
+                            "Supported types are 'label' and 'action'."
+                        )
 
             new_pred, record = self._sample_sequence(
                 batch_size,
@@ -1198,15 +1237,15 @@ class GibbsDFoTVideo(BasePytorchAlgo):
             if context.shape[:2] != context_mask.shape:
                 raise ValueError("context and context_mask must have the same shape.")
 
-        if conditions is not None:
-            if self.use_causal_mask and conditions.shape[1] != length:
-                raise ValueError(
-                    f"for causal models, conditions length is expected to be {length}, got {conditions.shape[1]}."
-                )
-            elif not self.use_causal_mask and conditions.shape[1] != self.max_tokens:
-                raise ValueError(
-                    f"for noncausal models, conditions length is expected to be {self.max_tokens}, got {conditions.shape[1]}."
-                )
+        # if conditions is not None:
+        #     if self.use_causal_mask and conditions.shape[1] != length:
+        #         raise ValueError(
+        #             f"for causal models, conditions length is expected to be {length}, got {conditions.shape[1]}."
+        #         )
+        #     elif not self.use_causal_mask and conditions.shape[1] != self.max_tokens:
+        #         raise ValueError(
+        #             f"for noncausal models, conditions length is expected to be {self.max_tokens}, got {conditions.shape[1]}."
+        #         )
 
         horizon = length if self.use_causal_mask else self.max_tokens
         padding = horizon - length
