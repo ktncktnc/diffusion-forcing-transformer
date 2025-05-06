@@ -15,7 +15,7 @@ training:
   batch_size: ${experiment.batch_size}
 
 validation:
-  precision: 16-true
+  precision: 32-true
   batch_size: ${experiment.batch_size}
   data:
     shuffle: False

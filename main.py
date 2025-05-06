@@ -83,7 +83,7 @@ def run_local(cfg: DictConfig):
             elif cfg.algorithm._name.startswith("gibbs_dfot"):
                 name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name}/{cfg.algorithm.backbone.name}/{cfg.algorithm.noise_level}_{str(cfg.algorithm.backbone.gibbs.mask_type)} ({output_dir.parent.name}/{output_dir.name})"
             else:
-                name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name}/{cfg.algorithm.noise_level} ({output_dir.parent.name}/{output_dir.name})"
+                name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name} ({output_dir.parent.name}/{output_dir.name})"
 
         if "_on_compute_node" in cfg and cfg.cluster.is_compute_node_offline:
             logger_cls = OfflineWandbLogger
@@ -96,7 +96,9 @@ def run_local(cfg: DictConfig):
             for k, v in OmegaConf.to_container(cfg.wandb, resolve=True).items()
             if k != "mode"
         }
-        tags = [cfg.experiment._name, cfg.dataset._name, cfg.algorithm._name, f"eval_scheduling_matrix:{cfg.algorithm.scheduling_matrix}", f"train_noise_level:{cfg.algorithm.noise_level}", cfg.algorithm.diffusion.objective] + cfg.experiment.tasks
+        tags = [cfg.experiment._name, cfg.dataset._name, cfg.algorithm._name] + cfg.experiment.tasks
+        if "dfot" in cfg.algorithm._name:
+            tags = tags +([f"eval_scheduling_matrix:{cfg.algorithm.scheduling_matrix}", f"train_noise_level:{cfg.algorithm.noise_level}", cfg.algorithm.diffusion.objective])
         if cfg.algorithm._name.startswith('gibbs'):
             tags.append(f"mask_type:{cfg.algorithm.backbone.gibbs.mask_type}")
         # add cfg.algorithm.backbone.name if it exists

@@ -112,6 +112,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
                 cfg=self.cfg.diffusion,
                 backbone_cfg=self.cfg.backbone,
                 x_shape=self.x_shape,
+                max_frames=self.max_frames,
                 max_tokens=self.max_tokens,
                 external_cond_type=self.external_cond_type,
                 external_cond_num_classes=self.external_cond_num_classes,
@@ -321,7 +322,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         """Training step"""
         xs, conditions, masks, *_ = batch
 
-        if self.cfg.noise_level in ["gibbs", "random_gibbs"]:
+        if "gibbs" in self.cfg.noise_level:
             noise_levels, frame_idx, masks = self._get_training_noise_levels(xs, masks)
             context_mask, noise_levels = self._generate_context_mask(xs, noise_levels, frame_idx, masks)
         else:
@@ -351,6 +352,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
             "loss": loss,
             "xs_pred": xs_pred,
             "xs": xs,
+            "frame_idx": frame_idx
         }
 
         return output_dict
@@ -378,9 +380,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
 
         # 2. Sample all videos (based on the specified tasks)
         # and log the generated videos and metrics.
-        if not (
-            self.trainer.sanity_checking and not self.cfg.logging.sanity_generation
-        ):
+        if (not (self.trainer.sanity_checking and not self.cfg.logging.sanity_generation)) and self.cfg.logging.validate_generation:
             all_videos = self._sample_all_videos(batch, batch_idx, namespace)
             self._update_metrics(all_videos)
             self._log_videos(all_videos, namespace)
@@ -477,11 +477,21 @@ class GibbsDFoTVideo(BasePytorchAlgo):
             recons[:num_videos_to_log],
             gt_videos[:num_videos_to_log],
             step=self.global_step,
-            namespace="denoising_vis",
+            namespace="video_denoising_vis",
             logger=self.logger.experiment,
             indent=self.num_logged_videos,
             captions="denoised | gt",
         )
+        if output['frame_idx'] is not None:
+            log_video(
+                recons[torch.arange(num_videos_to_log), output['frame_idx'][:num_videos_to_log]].unsqueeze(1),
+                gt_videos[torch.arange(num_videos_to_log), output['frame_idx'][:num_videos_to_log]].unsqueeze(1),
+                step=self.global_step,
+                namespace="frame_denoising_vis",
+                logger=self.logger.experiment,
+                indent=self.num_logged_videos,
+                captions="denoised | gt",
+            )
 
     # ---------------------------------------------------------------------
     # Sampling
@@ -935,6 +945,9 @@ class GibbsDFoTVideo(BasePytorchAlgo):
                     frame_idx.append(order[number_frames[i]].item())
                     noise_levels[i][order[:number_frames[i]]] = noise_levels[i][0] - noise_skip[i]
                 frame_idx = torch.tensor(frame_idx, device=xs.device)
+            case "random_independent_gibbs":
+                noise_levels = rand_fn((batch_size, n_tokens))
+                frame_idx = torch.randint(0, n_tokens, (batch_size,), device=xs.device)
             case "random_uniform":  # uniform noise levels (Typical Video Diffusion)
                 noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
 
@@ -953,7 +966,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
             ),
         )
 
-        if self.cfg.noise_level in ['gibbs', 'random_gibbs']:
+        if 'gibbs' in self.cfg.noise_level:
             return noise_levels, frame_idx, masks
 
         return noise_levels, masks
@@ -1317,10 +1330,14 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         for m in range(scheduling_matrix.shape[0] - 1):
             from_noise_levels = scheduling_matrix[m]
             to_noise_levels = scheduling_matrix[m + 1]
-            frame_idx = ((from_noise_levels[0] - to_noise_levels[0]) == 0).nonzero(
-                as_tuple=False
-            )[0]
-            frame_idx = repeat(frame_idx, 't -> (b t)', b=batch_size)
+
+            if self.cfg.scheduling_matrix in ['gibbs', 'random_gibbs']:
+                frame_idx = ((from_noise_levels[0] - to_noise_levels[0]) == 0).nonzero(
+                    as_tuple=False
+                )[0]
+                frame_idx = repeat(frame_idx, 't -> (b t)', b=batch_size)
+            else:
+                frame_idx = None
 
             # update context mask by changing 0 -> 2 for fully generated tokens
             context_mask = torch.where(

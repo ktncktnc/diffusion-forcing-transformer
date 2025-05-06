@@ -22,7 +22,7 @@ optimizer_beta: [0.9, 0.99]
 lr_scheduler:
   name: constant_with_warmup
   num_warmup_steps: 5000
-noise_level: gibbs
+noise_level: gibbs # gibbs, random_gibbs, random_independent, random_uniform
 uniform_future:
   enabled: false
 fixed_context:
@@ -34,20 +34,22 @@ variable_context:
   prob: 0
   dropout: 0
 backbone:
+  use_frame_idx_embedding: True
   gibbs:
-    enabled: true
+    enabled: false
     mask_type: null 
     # bert: mask input tokens, 
     # diagonal_gibbs: only mask the diagonal of the input self attention
-    # full_gibbs: mask whole columns of the input self attention
+    # gibbs: mask whole columns of the input self attention
     # diagonal: mask the diagonal of the input self attention
     # null: no masking
+    # token_hollow
+    # frame_hollow
 # sampling scheme
 chunk_size: -1
 scheduling_matrix: gibbs
 clean_context_ratio: 0.2
-replacement: noisy_scale
-
+# replacement: noisy_scale
 
 diffusion:
   is_continuous: False
@@ -114,3 +116,4 @@ logging:
   metrics_batch_size: 16
   sanity_generation: False # generate video samples during sanity check
   raw_dir: null
+  validate_generation: True

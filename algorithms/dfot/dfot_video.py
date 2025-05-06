@@ -487,6 +487,7 @@ class DFoTVideo(BasePytorchAlgo):
     ) -> Optional[Dict[str, Tensor]]:
         xs, conditions, *_, gt_videos = batch
         all_videos: Dict[str, Tensor] = {"gt": xs}
+
         for task in self.tasks:
             sample_fn = (
                 self._predict_videos
@@ -501,6 +502,9 @@ class DFoTVideo(BasePytorchAlgo):
         all_videos = {k: self._unnormalize_x(v).detach() for k, v in all_videos.items()}
         # decode latents if using latents
         if self.is_latent_diffusion:
+            if gt_videos is None:
+                gt_videos = self._decode(all_videos['gt'])
+
             all_videos = {
                 k: self._decode(v) if k != "gt" else gt_videos
                 for k, v in all_videos.items()
@@ -1238,13 +1242,6 @@ class DFoTVideo(BasePytorchAlgo):
         horizon = length if self.use_causal_mask else self.max_tokens
         padding = horizon - length
         # create initial xs_pred with noise
-        # xs_pred = torch.randn(
-        #     (batch_size, 1, *x_shape),
-        #     device=self.device,
-        #     generator=self.generator,
-        # )
-        # xs_pred = torch.repeat_interleave(
-        #     xs_pred, horizon, dim=1)
         xs_pred = torch.randn(
             (batch_size, horizon, *x_shape),
             device=self.device,

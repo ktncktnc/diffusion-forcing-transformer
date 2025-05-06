@@ -32,6 +32,7 @@ class DiscreteDiffusion(nn.Module):
         cfg: DictConfig,
         backbone_cfg: DictConfig,
         x_shape: torch.Size,
+        max_frames: int,
         max_tokens: int,
         external_cond_type: str,
         external_cond_num_classes: str,
@@ -40,6 +41,7 @@ class DiscreteDiffusion(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.x_shape = x_shape
+        self.max_frames = max_frames
         self.max_tokens = max_tokens
         self.external_cond_type = external_cond_type
         self.external_cond_num_classes = external_cond_num_classes  
@@ -76,6 +78,7 @@ class DiscreteDiffusion(nn.Module):
         self.model = model_cls(
             cfg=self.backbone_cfg,
             x_shape=self.x_shape,
+            max_frames=self.max_frames,
             max_tokens=self.max_tokens,
             external_cond_type=self.external_cond_type,
             external_cond_num_classes=self.external_cond_num_classes,
@@ -352,9 +355,10 @@ class DiscreteDiffusion(nn.Module):
             raise ValueError(f"unknown objective {self.objective}")
 
         # select the target based on the frame index
-        target = target[torch.arange(x.shape[0]), frame_idx].unsqueeze(1)
-        pred = pred[torch.arange(x.shape[0]), frame_idx].unsqueeze(1)
-        k = k[torch.arange(x.shape[0]), frame_idx].unsqueeze(1)
+        if frame_idx is not None:
+            target = target[torch.arange(x.shape[0]), frame_idx].unsqueeze(1)
+            pred = pred[torch.arange(x.shape[0]), frame_idx].unsqueeze(1)
+            k = k[torch.arange(x.shape[0]), frame_idx].unsqueeze(1)
 
         loss = F.mse_loss(pred, target.detach(), reduction="none")
         loss_weight = self.compute_loss_weights(k, self.loss_weighting.strategy)

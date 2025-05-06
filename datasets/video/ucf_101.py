@@ -149,7 +149,10 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
         Return list of latent paths for the given split
         """
         metadata = torch.load(self.metadata_dir / f"{split}.pt", weights_only=False)
-        return sorted([self.video_metadata_to_latent_path({key: metadata[key][i] for key in metadata.keys()}) for i in range(len(metadata["video_paths"]))], key=str)
+        paths = [self.video_metadata_to_latent_path({key: metadata[key][i] for key in metadata.keys()}) for i in range(len(metadata["video_paths"]))]
+        # check if paths exist
+        paths = [path for path in paths if path.exists()]
+        return paths
 
     def setup(self) -> None:
         if self.use_video_preprocessing:

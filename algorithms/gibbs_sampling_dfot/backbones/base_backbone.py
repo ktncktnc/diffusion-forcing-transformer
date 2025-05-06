@@ -14,6 +14,7 @@ class BaseBackbone(ABC, nn.Module):
         self,
         cfg: DictConfig,
         x_shape: torch.Size,
+        max_frames: int,
         max_tokens: int,
         external_cond_type: str,
         external_cond_num_classes: int,  # only for label
@@ -24,6 +25,10 @@ class BaseBackbone(ABC, nn.Module):
         super().__init__()
 
         self.cfg = cfg
+        self.max_frames = max_frames
+        self.max_tokens = max_tokens
+        
+        self.use_frame_idx_embedding = cfg.get("use_frame_idx_embedding", False)
         self.external_cond_type = external_cond_type
         self.external_cond_num_classes = external_cond_num_classes
         self.external_cond_dim = external_cond_dim
@@ -35,12 +40,23 @@ class BaseBackbone(ABC, nn.Module):
             time_embed_dim=self.noise_level_emb_dim,
             use_fourier=self.cfg.get("use_fourier_noise_embedding", False),
         )
+        self.frame_idx_embedding = self._build_gibbs_frame_idx_embedding()
         self.external_cond_embedding = self._build_external_cond_embedding()
+
+    def _build_gibbs_frame_idx_embedding(self) -> Optional[nn.Module]:
+        if not self.use_frame_idx_embedding:
+            return None
+        
+        return LabelEmbedding(
+            self.max_frames,
+            self.frame_idx_emd_dim,
+            dropout_prob=self.cfg.get("frame_idx_dropout", 0.0),
+        )
 
     def _build_external_cond_embedding(self) -> Optional[nn.Module]:
         if not self.external_cond_dim:
             return None
-        
+        print('self.external_cond_type', self.external_cond_type)
         if self.external_cond_type == 'label':
             return LabelEmbedding(
                 self.external_cond_num_classes,
@@ -71,6 +87,11 @@ class BaseBackbone(ABC, nn.Module):
     @property
     @abstractmethod
     def external_cond_emb_dim(self):
+        raise NotImplementedError
+    
+    @property
+    @abstractmethod
+    def frame_idx_emd_dim(self) -> int:
         raise NotImplementedError
 
     @abstractmethod
