@@ -149,7 +149,7 @@ class BaseLightningExperiment(BaseExperiment):
         trainer = pl.Trainer(
             accelerator="auto",
             logger=self.logger,
-            devices="auto",
+            devices=1,
             num_nodes=self.cfg.num_nodes,
             strategy=(
                 DDPStrategy(find_unused_parameters=self.cfg.find_unused_parameters)

@@ -152,6 +152,8 @@ class DiT3D(BaseBackbone):
 
         if gibbs_frame_idx is not None:
             # Add frame index embedding
+            if gibbs_frame_idx.dim() == 1:
+                gibbs_frame_idx = gibbs_frame_idx.unsqueeze(1)
             frame_idx_emb = self.frame_idx_embedding(gibbs_frame_idx)
             emb = emb + frame_idx_emb
         if external_cond is not None:
