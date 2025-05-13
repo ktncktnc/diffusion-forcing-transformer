@@ -71,7 +71,7 @@ class RNN_DiT3D(BaseBackbone):
 
         self.rnn = ConvLSTM(
             input_dim=self.in_channels,
-            hidden_dim=cfg.conv_lstm.hidden_dim,
+            hidden_dim=list(cfg.conv_lstm.hidden_dim) + [self.in_channels],
             kernel_size=cfg.conv_lstm.kernel_size,
             num_layers=cfg.conv_lstm.num_layers,
             batch_first=True,
@@ -144,7 +144,6 @@ class RNN_DiT3D(BaseBackbone):
         external_cond_mask: Optional[torch.Tensor] = None,
         gibbs_frame_idx: Optional[int] = None,
     ) -> torch.Tensor:
-        print('self.cfg', self.cfg)
         input_batch_size, n_frames = x.shape[:2]
         x = rearrange(x, "b t c h w -> (b t) c h w")
         x = self.patch_embedder(x)

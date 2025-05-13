@@ -120,6 +120,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
             ),
             disable=not self.cfg.compile,
         )
+        print('self.diffusion_model', self.diffusion_model)
         self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
 
         # 2. VAE model

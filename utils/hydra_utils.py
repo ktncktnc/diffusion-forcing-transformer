@@ -76,11 +76,11 @@ def unwrap_shortcuts(
                     new_argv += _yaml_to_cli(default_path)
                 else:
                     raise ValueError(f"Shortcut @{shortcut} not found.")
-        # elif arg.startswith("algorithm/backbone="):
-        #     # this is a workaround to enable overriding the backbone in the command line
-        #     # otherwise, the backbone could be re-overridden by
-        #     # the backbone cfgs in dataset-experiment dependent cfgs
-        #     new_argv += override_backbone(arg[19:])
+        elif arg.startswith("algorithm/backbone="):
+            # this is a workaround to enable overriding the backbone in the command line
+            # otherwise, the backbone could be re-overridden by
+            # the backbone cfgs in dataset-experiment dependent cfgs
+            new_argv += override_backbone(arg[19:])
         else:
             new_argv.append(arg)
 

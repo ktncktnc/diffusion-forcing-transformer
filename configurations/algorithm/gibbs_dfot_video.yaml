@@ -22,7 +22,7 @@ optimizer_beta: [0.9, 0.99]
 lr_scheduler:
   name: constant_with_warmup
   num_warmup_steps: 5000
-noise_level: gibbs # gibbs, random_gibbs, random_independent, random_uniform
+noise_level: random_independent # gibbs, random_gibbs, random_independent, random_uniform
 uniform_future:
   enabled: false
 fixed_context:
@@ -47,7 +47,7 @@ backbone:
     # frame_hollow
 # sampling scheme
 chunk_size: -1
-scheduling_matrix: gibbs
+scheduling_matrix: full_sequence
 clean_context_ratio: 0.2
 # replacement: noisy_scale
 

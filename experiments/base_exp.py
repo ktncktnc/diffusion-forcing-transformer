@@ -151,11 +151,12 @@ class BaseLightningExperiment(BaseExperiment):
             logger=self.logger,
             devices=1,
             num_nodes=self.cfg.num_nodes,
-            strategy=(
-                DDPStrategy(find_unused_parameters=self.cfg.find_unused_parameters)
-                if torch.cuda.device_count() > 1
-                else "auto"
-            ),
+            # strategy=(
+            #     DDPStrategy(find_unused_parameters=self.cfg.find_unused_parameters)
+            #     if torch.cuda.device_count() > 1
+            #     else "auto"
+            # ),
+            # strategy=None,
             callbacks=callbacks,
             gradient_clip_val=self.cfg.training.optim.gradient_clip_val,
             val_check_interval=self.cfg.validation.val_every_n_step,
@@ -176,6 +177,11 @@ class BaseLightningExperiment(BaseExperiment):
         )
 
         # Check properties of the trainer
+        print('torch.cuda.device_count()', torch.cuda.device_count())
+        for i in range(torch.cuda.device_count()):
+            print(torch.cuda.get_device_properties(i).name)
+        
+        print('self.cfg.num_nodes', self.cfg.num_nodes)
         print(f"Accelerator: {trainer.accelerator}")
         print(f"Device type: {trainer.accelerator.auto_device_count()}")
         print(f"Devices: {trainer.device_ids}")
