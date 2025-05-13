@@ -63,8 +63,8 @@ def log_video(
 
     if isinstance(context_frames, int):
         context_frames = torch.arange(context_frames, device=observation_gt.device)
-    for observation_hat in observation_hats:
-        observation_hat[:, context_frames] = observation_gt[:, context_frames]
+    # for observation_hat in observation_hats:
+    #     observation_hat[:, context_frames] = observation_gt[:, context_frames]
 
     if raw_dir is not None:
         raw_dir = Path(raw_dir)

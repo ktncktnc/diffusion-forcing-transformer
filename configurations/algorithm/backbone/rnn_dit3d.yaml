@@ -1,0 +1,14 @@
+name: rnn_dit3d 
+variant: full
+pos_emb_type: rope_3d
+patch_size: 2
+hidden_size: 384
+depth: 12
+num_heads: 6
+mlp_ratio: 4.0
+conv_lstm:
+  hidden_dim: 128
+  kernel_size: 3
+  num_layers: 3
+  
+use_gradient_checkpointing: True

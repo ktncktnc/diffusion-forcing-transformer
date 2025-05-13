@@ -37,6 +37,11 @@ chunk_size: -1
 scheduling_matrix: full_sequence
 replacement: noisy_scale
 
+refinement_sampling:
+  enabled: False
+  goback_length: 1
+  n_goback: 1
+
 diffusion:
   is_continuous: False
   timesteps: 1000
@@ -56,6 +61,7 @@ diffusion:
   ddim_sampling_eta: 0.0
   # (For full sequence diffusion)
   reconstruction_guidance: 0.0
+
 
 # vae
 vae:

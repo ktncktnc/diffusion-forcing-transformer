@@ -9,7 +9,7 @@ from .dit_base import DiTBase
 from .clstm import ConvLSTM
 
 
-class RNNDiT3D(BaseBackbone):
+class RNN_DiT3D(BaseBackbone):
 
     def __init__(
         self,
@@ -69,7 +69,7 @@ class RNNDiT3D(BaseBackbone):
             use_gradient_checkpointing=cfg.use_gradient_checkpointing,
         )
 
-        self.conv_lstm = ConvLSTM(
+        self.rnn = ConvLSTM(
             input_dim=self.in_channels,
             hidden_dim=cfg.conv_lstm.hidden_dim,
             kernel_size=cfg.conv_lstm.kernel_size,
@@ -144,6 +144,7 @@ class RNNDiT3D(BaseBackbone):
         external_cond_mask: Optional[torch.Tensor] = None,
         gibbs_frame_idx: Optional[int] = None,
     ) -> torch.Tensor:
+        print('self.cfg', self.cfg)
         input_batch_size, n_frames = x.shape[:2]
         x = rearrange(x, "b t c h w -> (b t) c h w")
         x = self.patch_embedder(x)
@@ -189,6 +190,10 @@ class RNNDiT3D(BaseBackbone):
         x = rearrange(
             x, "(b t) h w c -> b t c h w", b=input_batch_size
         )  # (B, T, C, H, W)
+
+        # RNN
+        x, _ = self.rnn(x)
+
         return x
 
     def gibbs_preprocessing(self, tokens: torch.Tensor, n_frames: int, n_tokens_per_frame: int, frame_idx, device) -> torch.Tensor:

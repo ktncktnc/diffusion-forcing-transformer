@@ -80,11 +80,24 @@ class ConvLSTM(nn.Module):
         >> _, last_states = convlstm(x)
         >> h = last_states[0][0]  # 0 for layer index, 0 for h index
     """
-    def __init__(self, input_dim, hidden_dim, kernel_size, num_layers,
-                 batch_first=False, bias=True, return_all_layers=False):
+    def __init__(
+            self, 
+            input_dim, 
+            hidden_dim, 
+            kernel_size, 
+            num_layers,
+            batch_first=False, 
+            bias=True, 
+            return_all_layers=False,
+            use_gradient_checkpointing=False    
+        ):
         super(ConvLSTM, self).__init__()
 
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
         self._check_kernel_size_consistency(kernel_size)
+
+        self.use_gradient_checkpointing = use_gradient_checkpointing
 
         # Make sure that both `kernel_size` and `hidden_dim` are lists having len == num_layers
         kernel_size = self._extend_for_multilayer(kernel_size, num_layers)
@@ -110,10 +123,17 @@ class ConvLSTM(nn.Module):
                                           bias=self.bias))
 
         self.cell_list = nn.ModuleList(cell_list)
-
+    
     def forward(self, input_tensor, hidden_state=None):
+        if self.use_gradient_checkpointing:
+            func = lambda *args: self.__forward(*args)
+            # Use gradient checkpointing to save memory
+            return torch.utils.checkpoint.checkpoint(func, input_tensor, hidden_state, use_reentrant=False)
+        else:
+            return self.__forward(input_tensor, hidden_state)
+        
+    def __forward(self, input_tensor, hidden_state=None):
         """
-
         Parameters
         ----------
         input_tensor: todo
@@ -160,8 +180,8 @@ class ConvLSTM(nn.Module):
             last_state_list.append([h, c])
 
         if not self.return_all_layers:
-            layer_output_list = layer_output_list[-1:]
-            last_state_list = last_state_list[-1:]
+            layer_output_list = layer_output_list[-1]
+            last_state_list = last_state_list[-1]
 
         return layer_output_list, last_state_list
 
