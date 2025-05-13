@@ -12,4 +12,10 @@ python -m main +name=single_image_to_short dataset=realestate10k_mini algorithm=
 
 python -m main +name=single_image_to_short dataset=ucf_101 algorithm=gibbs_dfot_video experiment=video_generation @DiT/B load= 'experiment.tasks=[validation]' experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=2 algorithm.tasks.prediction.history_guidance.name=conditional wandb.mode=disabled
 
-python -m main +name=Preprocessing_UCF101 dataset=ucf101 algorithm=dc_ae_preprocessor experiment=video_latent_preprocessing
+`python -m main +name=Preprocessing_UCF101 dataset=ucf_101 algorithm=dc_ae_preprocessor experiment=video_latent_preprocessing
+`
+
+
+python -m main +name=single_image_to_short dataset=cond_ucf_101 algorithm=gibbs_dfot_video experiment=video_generation @DiT/B 'load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/cond_ucf_101/gibbs_dfot_video/2025-05-03/22-46-34/checkpoints/epoch\=3-step\=150005.ckpt' 'experiment.tasks=[validation]' experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional algorithm.logging.validate_generation=False
+
+python -m main +name=training_single_image_to_short dataset=cond_ucf_101 algorithm=dfot_video experiment=video_generation @DiT/B 'load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/cond_ucf_101/dfot_video/2025-05-03/07-07-26/checkpoints/last.ckpt' 'experiment.tasks=[validation]' experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional

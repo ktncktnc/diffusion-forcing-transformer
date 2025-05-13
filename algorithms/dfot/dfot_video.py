@@ -750,14 +750,36 @@ class DFoTVideo(BasePytorchAlgo):
                 ),
             ):
                 batch_size = current_context_chunk.shape[0]
-                xs_pred_chunk, _ = self._sample_sequence(
-                    batch_size=batch_size,
-                    context=current_context_chunk,
-                    context_mask=current_context_mask_chunk.long(),
-                    conditions=current_conditions_chunk,
-                    history_guidance=history_guidance,
-                    pbar=pbar,
-                )
+                if self.cfg.refinement_sampling.enabled:
+                    xs_pred_chunk, _ = self._sample_sequence_refine(
+                        batch_size=batch_size,
+                        context=current_context_chunk,
+                        goback_length=self.cfg.refinement_sampling.goback_length,
+                        n_goback=self.cfg.refinement_sampling.n_goback,
+                        context_mask=current_context_mask_chunk.long(),
+                        conditions=current_conditions_chunk,
+                        # history_guidance=history_guidance,
+                        pbar=pbar,
+                    )
+                    # xs_pred_chunk, _ = self._sample_sequence(
+                    #     batch_size=batch_size,
+                    #     context=current_context_chunk,
+                    #     # goback_length=self.cfg.refinement_sampling.goback_length,
+                    #     # n_goback=self.cfg.refinement_sampling.n_goback,
+                    #     context_mask=current_context_mask_chunk.long(),
+                    #     conditions=current_conditions_chunk,
+                    #     # history_guidance=history_guidance,
+                    #     pbar=pbar,
+                    # )
+                else:
+                    xs_pred_chunk, _ = self._sample_sequence(
+                        batch_size=batch_size,
+                        context=current_context_chunk,
+                        context_mask=current_context_mask_chunk.long(),
+                        conditions=current_conditions_chunk,
+                        history_guidance=history_guidance,
+                        pbar=pbar,
+                    )
                 xs_pred.append(xs_pred_chunk)
 
             xs_pred = torch.cat(xs_pred, 0)
@@ -1011,6 +1033,37 @@ class DFoTVideo(BasePytorchAlgo):
         )
 
         return scheduling_matrix
+    
+    def _generate_refine_scheduling_matrix(
+        self,
+        horizon: int,
+        goback_length: int,
+        n_goback: int,
+        padding: int = 0,
+    ):
+        assert self.cfg.scheduling_matrix == 'full_sequence', "Refining only support full_sequence scheduling matrix"
+        scheduling_matrix = np.arange(self.sampling_timesteps, -1, -1)
+        final_scheduling_matrix = []
+
+        goback_idxs = [i for i in range(1, self.sampling_timesteps - goback_length, goback_length)]
+        for t in scheduling_matrix:
+            final_scheduling_matrix.append(t)
+            if t in goback_idxs:
+                for i in range(n_goback):
+                    final_scheduling_matrix = final_scheduling_matrix + [s for s in range(t+1,t+goback_length+1)]
+                    final_scheduling_matrix = final_scheduling_matrix + [s for s in range(t+goback_length-1,t-1,-1)]
+        
+        final_scheduling_matrix = torch.tensor(final_scheduling_matrix).long()
+        scheduling_matrix = self.diffusion_model.ddim_idx_to_noise_level(final_scheduling_matrix)[:, None].repeat(1, horizon)
+        
+        # paded entries are labeled as pure noise
+        scheduling_matrix = F.pad(
+            scheduling_matrix, (0, padding, 0, 0), value=self.timesteps - 1
+        )
+
+        return scheduling_matrix
+
+        
 
     def _predict_sequence(
         self,
@@ -1130,18 +1183,46 @@ class DFoTVideo(BasePytorchAlgo):
                             "Supported types are 'label' and 'action'."
                         )
 
-            new_pred, record = self._sample_sequence(
-                batch_size,
-                length=l,
-                context=context,
-                context_mask=context_mask,
-                conditions=cond_slice,
-                guidance_fn=guidance_fn,
-                reconstruction_guidance=reconstruction_guidance,
-                history_guidance=history_guidance,
-                return_all=return_all,
-                pbar=pbar,
-            )
+            if self.cfg.refinement_sampling.enabled:
+                new_pred, record = self._sample_sequence_refine(
+                    batch_size,
+                    length=l,
+                    context=context,
+                    context_mask=context_mask,
+                    conditions=cond_slice,
+                    goback_length=self.cfg.refinement_sampling.goback_length,
+                    n_goback=self.cfg.refinement_sampling.n_goback,
+                    guidance_fn=guidance_fn,
+                    reconstruction_guidance=reconstruction_guidance,
+                    return_all=return_all,
+                    pbar=pbar,
+                )
+                # new_pred, record = self._sample_sequence(
+                #     batch_size,
+                #     length=l,
+                #     context=context,
+                #     context_mask=context_mask,
+                #     conditions=cond_slice,
+                #     # goback_length=self.cfg.refinement_sampling.goback_length,
+                #     # n_goback=self.cfg.refinement_sampling.n_goback,
+                #     guidance_fn=guidance_fn,
+                #     reconstruction_guidance=reconstruction_guidance,
+                #     return_all=return_all,
+                #     pbar=pbar,
+                # )
+            else:
+                new_pred, record = self._sample_sequence(
+                    batch_size,
+                    length=l,
+                    context=context,
+                    context_mask=context_mask,
+                    conditions=cond_slice,
+                    guidance_fn=guidance_fn,
+                    reconstruction_guidance=reconstruction_guidance,
+                    history_guidance=history_guidance,
+                    return_all=return_all,
+                    pbar=pbar,
+                )
             xs_pred = torch.cat([xs_pred, new_pred[:, -h:]], 1)
             curr_token = xs_pred.shape[1]
         pbar.close()
@@ -1283,7 +1364,7 @@ class DFoTVideo(BasePytorchAlgo):
         )
         scheduling_matrix = scheduling_matrix.to(self.device)
         scheduling_matrix = repeat(scheduling_matrix, "m t -> m b t", b=batch_size)
-        # fill context tokens' noise levels as -1 in scheduling matrix
+        # Full sequence training: fill context tokens' noise levels as -1 in scheduling matrix
         if not self.is_full_sequence:
             scheduling_matrix = torch.where(
                 context_mask[None] >= 1, -1, scheduling_matrix
@@ -1389,6 +1470,216 @@ class DFoTVideo(BasePytorchAlgo):
             )
             pbar.update(1)
 
+        if return_all:
+            record.append(xs_pred.clone())
+            record = torch.stack(record)
+        if padding > 0:
+            xs_pred = xs_pred[:, :-padding]
+            record = record[:, :, :-padding] if return_all else None
+
+        return xs_pred, record
+    
+    def _sample_sequence_refine(
+        self,
+        batch_size: int,
+        goback_length: int,
+        n_goback: int,
+        length: Optional[int] = None,
+        context: Optional[torch.Tensor] = None,
+        context_mask: Optional[torch.Tensor] = None,
+        conditions: Optional[torch.Tensor] = None,
+        guidance_fn: Optional[Callable] = None,
+        reconstruction_guidance: float = 0.0,
+        # history_guidance: Optional[HistoryGuidance] = None,
+        return_all: bool = False,
+        pbar: Optional[tqdm] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+        The unified sampling method, with length up to maximum token size.
+        context of length can be provided along with a mask to achieve conditioning.
+
+        Args
+        ----
+        batch_size: int
+            Batch size of the sampling process
+        length: Optional[int]
+            Number of frames in sampled sequence
+            If None, fall back to length of context, and then fall back to `self.max_tokens`
+        context: Optional[torch.Tensor], Shape (batch_size, length, *self.x_shape)
+            Context tokens to condition on. Assumed to be same across batch.
+            Tokens that are specified as context by `context_mask` will be used for conditioning,
+            and the rest will be discarded.
+        context_mask: Optional[torch.Tensor], Shape (batch_size, length)
+            Mask for context
+            0 = To be generated, 1 = Ground truth context, 2 = Generated context
+            Some sampling logic may discriminate between ground truth and generated context.
+        conditions: Optional[torch.Tensor], Shape (batch_size, length (causal) or self.max_tokens (noncausal), ...)
+            Unprocessed external conditions for sampling
+        guidance_fn: Optional[Callable]
+            Guidance function for sampling
+        return_all: bool
+            Whether to return all steps of the sampling process
+        Returns
+        -------
+        xs_pred: torch.Tensor, Shape (batch_size, length, *self.x_shape)
+            Complete sequence containing context and generated tokens
+        record: Optional[torch.Tensor], Shape (num_steps, batch_size, length, *self.x_shape)
+            All recorded intermediate results during the sampling process
+        """
+        x_shape = self.x_shape
+
+        if length is None:
+            length = self.max_tokens if context is None else context.shape[1]
+        if length > self.max_tokens:
+            raise ValueError(
+                f"length is expected to <={self.max_tokens}, got {length}."
+            )
+
+        if context is not None:
+            if context_mask is None:
+                raise ValueError("context_mask must be provided if context is given.")
+            if context.shape[0] != batch_size:
+                raise ValueError(
+                    f"context batch size is expected to be {batch_size} but got {context.shape[0]}."
+                )
+            if context.shape[1] != length:
+                raise ValueError(
+                    f"context length is expected to be {length} but got {context.shape[1]}."
+                )
+            if tuple(context.shape[2:]) != tuple(x_shape):
+                raise ValueError(
+                    f"context shape not compatible with x_stacked_shape {x_shape}."
+                )
+
+        if context_mask is not None:
+            if context is None:
+                raise ValueError("context must be provided if context_mask is given. ")
+            if context.shape[:2] != context_mask.shape:
+                raise ValueError("context and context_mask must have the same shape.")
+
+        horizon = length if self.use_causal_mask else self.max_tokens
+        padding = horizon - length
+        # create initial xs_pred with noise
+        xs_pred = torch.randn(
+            (batch_size, horizon, *x_shape),
+            device=self.device,
+            generator=self.generator,
+        )
+        xs_pred = torch.clamp(xs_pred, -self.clip_noise, self.clip_noise)
+
+        if context is None:
+            # create empty context and zero context mask
+            context = torch.zeros_like(xs_pred)
+            context_mask = torch.zeros_like(
+                (batch_size, horizon), dtype=torch.long, device=self.device
+            )
+        elif padding > 0:
+            # pad context and context mask to reach horizon
+            context_pad = torch.zeros(
+                (batch_size, padding, *x_shape), device=self.device
+            )
+            # NOTE: In context mask, -1 = padding, 0 = to be generated, 1 = GT context, 2 = generated context
+            context_mask_pad = -torch.ones(
+                (batch_size, padding), dtype=torch.long, device=self.device
+            )
+            context = torch.cat([context, context_pad], 1)
+            context_mask = torch.cat([context_mask, context_mask_pad], 1)
+
+        # replace xs_pred's context frames with context
+        # xs_pred = torch.where(self._extend_x_dim(context_mask) >= 1, context, xs_pred)
+
+        # generate scheduling matrix
+        # scheduling_matrix = self._generate_refine_scheduling_matrix(
+        #     horizon=horizon - padding,
+        #     goback_length=goback_length,
+        #     n_goback=n_goback,
+        #     padding=padding,
+        # )        
+        scheduling_matrix = self._generate_scheduling_matrix(
+            horizon=horizon - padding,
+            padding=padding,
+        )
+        # xs_pred = torch.where(self._extend_x_dim(context_mask) >= 1, context, xs_pred)
+        # torch.set_printoptions(threshold=100000000, linewidth=10000)
+        # print('\n')
+        # print(scheduling_matrix)
+        # exit(0)
+        scheduling_matrix = scheduling_matrix.to(self.device)
+        scheduling_matrix = repeat(scheduling_matrix, "m t -> m b t", b=batch_size)
+
+        # if not self.is_full_sequence:
+        #     scheduling_matrix = torch.where(
+        #         context_mask[None] >= 1, -1, scheduling_matrix
+        #     )
+        
+        record = [] if return_all else None
+
+        if pbar is None:
+            pbar = tqdm(
+                total=scheduling_matrix.shape[0] - 1,
+                initial=0,
+                desc="Sampling with DFoT",
+                leave=False,
+            )
+
+        for m in range(scheduling_matrix.shape[0] - 1):
+            from_noise_levels = scheduling_matrix[m]
+            to_noise_levels = scheduling_matrix[m+1]
+            
+            # context_mask = torch.where(
+            #     torch.logical_and(context_mask == 0, from_noise_levels == -1),
+            #     2,
+            #     context_mask,
+            # )
+            
+            # Reverse process: x_tm1 ~ p(x_tm1|x_t)
+            # TODO: replace x_tm1 = context_mask * x^c_tm1 + (1-context_mask) * x^g_tm1 
+            # print('\n', from_noise_levels[0,0].item(), to_noise_levels[0,0].item())
+            # if from_noise_levels[0,0].item() > to_noise_levels[0,0].item():
+            if True:
+                # print(from_noise_levels, to_noise_levels)
+                # create a backup with all context tokens unmodified
+                xs_pred_prev = xs_pred.clone()
+                if return_all:
+                    record.append(xs_pred.clone())
+
+                conditions_mask = None
+                # update xs_pred by DDIM or DDPM sampling
+                xs_pred = self.diffusion_model.sample_step(
+                    xs_pred,
+                    from_noise_levels,
+                    to_noise_levels,
+                    self._process_conditions(
+                        (
+                            repeat(
+                                conditions,
+                                "b ... -> (b nfe) ...",
+                                nfe=1,
+                            ).clone()
+                            if conditions is not None
+                            else None
+                        ),
+                        from_noise_levels,
+                    ),
+                    conditions_mask,
+                    guidance_fn=guidance_fn,
+                )
+                # xc_t = self.diffusion_model.q_sample(context, to_noise_levels)
+                # xs_pred = torch.where(
+                #     self._extend_x_dim(context_mask) == 0, xs_pred, xc_t
+                # )
+
+                pbar.update(1)
+            
+            # Forward process: x_t ~ p(x_t|x_tm1)
+            # else:
+            #     xs_pred = self.diffusion_model.q_sample_from_x_k(
+            #         xs_pred,
+            #         from_noise_levels,
+            #         to_noise_levels
+            #     )
+
+        # exit(0)
         if return_all:
             record.append(xs_pred.clone())
             record = torch.stack(record)

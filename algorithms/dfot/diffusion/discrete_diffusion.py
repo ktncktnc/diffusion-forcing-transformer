@@ -239,6 +239,16 @@ class DiscreteDiffusion(nn.Module):
             extract(self.sqrt_alphas_cumprod, k, x_start.shape) * x_start
             + extract(self.sqrt_one_minus_alphas_cumprod, k, x_start.shape) * noise
         )
+    
+    def q_sample_from_x_k(self, x_k, cur_noise_levels, next_noise_levels, noise=None):
+        if noise is None:
+            noise = torch.randn_like(x_k)
+            noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
+
+        scale = extract(self.alphas_cumprod, next_noise_levels, x_k.shape) / extract(self.alphas_cumprod, cur_noise_levels, x_k.shape)
+
+        scale = torch.where(next_noise_levels[..., None, None, None] == 999, 1.0, scale)
+        return torch.sqrt(scale) * x_k + torch.sqrt(1 - scale) * noise
 
     def p_mean_variance(self, x, k, external_cond=None, external_cond_mask=None):
         model_pred = self.model_predictions(
@@ -384,10 +394,10 @@ class DiscreteDiffusion(nn.Module):
             )
 
         # FIXME: temporary code for checking ddpm sampling
-        assert torch.all(
-            (curr_noise_level - 1 == next_noise_level)
-            | ((curr_noise_level == -1) & (next_noise_level == -1))
-        ), "Wrong noise level given for ddpm sampling."
+        # assert torch.all(
+        #     (curr_noise_level - 1 == next_noise_level)
+        #     | ((curr_noise_level == -1) & (next_noise_level == -1))
+        # ), "Wrong noise level given for ddpm sampling."
 
         assert (
             self.sampling_timesteps == self.timesteps
