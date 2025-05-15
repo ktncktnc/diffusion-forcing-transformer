@@ -16,7 +16,7 @@ from lightning.pytorch.strategies.ddp import DDPStrategy
 import lightning.pytorch as pl
 from lightning.pytorch.loggers.wandb import WandbLogger
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, TQDMProgressBar
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from utils.print_utils import cyan
 from utils.distributed_utils import rank_zero_print
@@ -111,7 +111,7 @@ class BaseLightningExperiment(BaseExperiment):
     ) -> None:
         super().__init__(root_cfg, logger, ckpt_path)
         import pprint
-        pprint.pp(self.root_cfg)
+        pprint.pp(OmegaConf.to_yaml(self.root_cfg))
         self.data_module = self.data_module_cls(root_cfg, self.compatible_datasets)
 
     def _build_common_callbacks(self):
@@ -210,13 +210,13 @@ class BaseLightningExperiment(BaseExperiment):
         trainer = pl.Trainer(
             accelerator="auto",
             logger=self.logger,
-            devices="auto",
+            devices=1,
             num_nodes=self.cfg.num_nodes,
-            strategy=(
-                DDPStrategy(find_unused_parameters=self.cfg.find_unused_parameters)
-                if torch.cuda.device_count() > 1
-                else "auto"
-            ),
+            # strategy=(
+            #     DDPStrategy(find_unused_parameters=self.cfg.find_unused_parameters)
+            #     if torch.cuda.device_count() > 1
+            #     else "auto"
+            # ),
             callbacks=callbacks,
             limit_val_batches=self.cfg.validation.limit_batch,
             precision=self.cfg.validation.precision,
@@ -247,13 +247,13 @@ class BaseLightningExperiment(BaseExperiment):
         trainer = pl.Trainer(
             accelerator="auto",
             logger=self.logger,
-            devices="auto",
+            devices=1,
             num_nodes=self.cfg.num_nodes,
-            strategy=(
-                DDPStrategy(find_unused_parameters=self.cfg.find_unused_parameters)
-                if torch.cuda.device_count() > 1
-                else "auto"
-            ),
+            # strategy=(
+            #     DDPStrategy(find_unused_parameters=self.cfg.find_unused_parameters)
+            #     if torch.cuda.device_count() > 1
+            #     else "auto"
+            # ),
             callbacks=callbacks,
             limit_test_batches=self.cfg.test.limit_batch,
             precision=self.cfg.test.precision,

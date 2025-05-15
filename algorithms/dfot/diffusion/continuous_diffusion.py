@@ -98,9 +98,11 @@ class ContinuousDiffusion(DiscreteDiffusion):
         backbone_cfg: DictConfig,
         x_shape: torch.Size,
         max_tokens: int,
+        external_cond_type: str,
+        external_cond_num_classes: str,
         external_cond_dim: int,
     ):
-        super().__init__(cfg, backbone_cfg, x_shape, max_tokens, external_cond_dim)
+        super().__init__(cfg, backbone_cfg, x_shape, max_tokens, external_cond_type, external_cond_num_classes, external_cond_dim)
         assert (
             self.objective == "pred_v" and self.loss_weighting.strategy == "sigmoid"
         ), "ContinuousDiffusion only supports 'pred_v' objective and 'sigmoid' loss weighting"

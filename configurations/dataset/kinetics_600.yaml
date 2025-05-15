@@ -5,6 +5,7 @@ defaults:
   - base_video
 
 latent:
+  enabled: True
   type: online
   suffix: null
   downsampling_factor: [4, 8]

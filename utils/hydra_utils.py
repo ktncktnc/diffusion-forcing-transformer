@@ -83,7 +83,7 @@ def unwrap_shortcuts(
             new_argv += override_backbone(arg[19:])
         else:
             new_argv.append(arg)
-
+    print('new_argv', new_argv)
     return new_argv
 
 

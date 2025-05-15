@@ -11,7 +11,7 @@ data_mean: "data/${dataset.name}/data_mean.npy"
 data_std: "data/${dataset.name}/data_std.npy"
 # Latent Configuration
 latent:
-  enable: False # Whether to use latents
+  enabled: False # Whether to use latents
   type: pre_sample # Type of how latents are computed
   # pre_sample: preprocess latents as samples, online: compute latents online (not saved)
   suffix: null # latents are saved at ${save_dir}_${latent.suffix} folder

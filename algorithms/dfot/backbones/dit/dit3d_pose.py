@@ -17,6 +17,8 @@ class DiT3DPose(DiT3D):
         cfg: DictConfig,
         x_shape: torch.Size,
         max_tokens: int,
+        external_cond_type: str,
+        external_cond_num_classes: int, # only for label
         external_cond_dim: int,
         use_causal_mask=True,
     ):
@@ -27,8 +29,10 @@ class DiT3DPose(DiT3D):
             cfg,
             x_shape,
             max_tokens,
+            external_cond_type,
+            external_cond_num_classes,
             cfg.conditioning.dim,
-            use_causal_mask,
+            use_causal_mask
         )
 
     @property

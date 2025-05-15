@@ -13,7 +13,7 @@ dataset:
   num_eval_videos: 1000
   subdataset_size: null
   latent:
-    enable: True
+    enabled: True
 
 algorithm:
   num_sanity_val_steps: 1
@@ -38,7 +38,7 @@ algorithm:
 
 experiment:
   ema:
-    enable: True
+    enabled: True
     decay: 0.999
   training:
     max_steps: 400000

@@ -29,10 +29,10 @@ class DiT3D(BaseBackbone):
             cfg,
             x_shape,
             max_tokens,
-            external_cond_type,
-            external_cond_num_classes,
-            external_cond_dim,
-            use_causal_mask,
+            external_cond_type=external_cond_type,
+            external_cond_num_classes=external_cond_num_classes,
+            external_cond_dim=external_cond_dim,
+            use_causal_mask=use_causal_mask,
         )
 
         hidden_size = cfg.hidden_size

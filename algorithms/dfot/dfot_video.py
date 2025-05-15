@@ -45,7 +45,7 @@ class DFoTVideo(BasePytorchAlgo):
         )
 
         # 2. Latent
-        self.is_latent_diffusion = cfg.latent.enable
+        self.is_latent_diffusion = cfg.latent.enabled
         self.is_latent_online = cfg.latent.type == "online"
         self.temporal_downsampling_factor = cfg.latent.downsampling_factor[0]
         self.is_latent_video_vae = self.temporal_downsampling_factor > 1
@@ -290,15 +290,16 @@ class DFoTVideo(BasePytorchAlgo):
         # 1. Tokenize the videos and optionally prepare the ground truth videos
         gt_videos = None
         if self.is_latent_diffusion:
-            xs = (
-                self._encode(batch["videos"])
-                if self.is_latent_online
-                else batch["latents"]
-            )
+            if self.is_latent_online:
+                xs = self._encode(batch["videos"])
+            else:
+                xs = batch['latents']
+
             if "videos" in batch:
                 gt_videos = batch["videos"]
         else:
             xs = batch["videos"]
+        # TODO: should we normalize??
         xs = self._normalize_x(xs)
 
         # 2. Prepare external conditions
@@ -512,10 +513,10 @@ class DFoTVideo(BasePytorchAlgo):
             }
 
         # # replace the context frames of video predictions with the ground truth
-        if "prediction" in all_videos:
-            all_videos["prediction"][:, : self.n_context_frames] = all_videos["gt"][
-                :, : self.n_context_frames
-            ]
+        # if "prediction" in all_videos:
+        #     all_videos["prediction"][:, : self.n_context_frames] = all_videos["gt"][
+        #         :, : self.n_context_frames
+        #     ]
         return all_videos
 
     def _predict_videos(
@@ -545,18 +546,19 @@ class DFoTVideo(BasePytorchAlgo):
             [torch.arange(self.n_context_tokens), keyframe_indices]
         ).unique()  # context frames are always keyframes
 
-        match self.external_cond_type:
-            case "label":
-                key_conditions = conditions if conditions is not None else None
-            case "action":
-                key_conditions = (
-                conditions[:, keyframe_indices] if conditions is not None else None
-            )
-            case _:
-                raise ValueError(
-                    f"Unknown external condition type: {self.external_cond_type}. "
-                    "Supported types are 'label' and 'action'."
-                )
+        if conditions is not None:
+            match self.external_cond_type:
+                case "label":
+                    key_conditions = conditions
+                case "action":
+                    key_conditions = conditions[:, keyframe_indices]
+                case _:
+                    raise ValueError(
+                        f"Unknown external condition type: {self.external_cond_type}. "
+                        "Supported types are 'label' and 'action'."
+                    )
+        else:
+            key_conditions = None
         
         # 1. Predict the keyframes
         xs_pred_key, *_ = self._predict_sequence(
@@ -762,16 +764,6 @@ class DFoTVideo(BasePytorchAlgo):
                         # history_guidance=history_guidance,
                         pbar=pbar,
                     )
-                    # xs_pred_chunk, _ = self._sample_sequence(
-                    #     batch_size=batch_size,
-                    #     context=current_context_chunk,
-                    #     # goback_length=self.cfg.refinement_sampling.goback_length,
-                    #     # n_goback=self.cfg.refinement_sampling.n_goback,
-                    #     context_mask=current_context_mask_chunk.long(),
-                    #     conditions=current_conditions_chunk,
-                    #     # history_guidance=history_guidance,
-                    #     pbar=pbar,
-                    # )
                 else:
                     xs_pred_chunk, _ = self._sample_sequence(
                         batch_size=batch_size,
@@ -1064,8 +1056,6 @@ class DFoTVideo(BasePytorchAlgo):
 
         return scheduling_matrix
 
-        
-
     def _predict_sequence(
         self,
         context: torch.Tensor,
@@ -1198,19 +1188,6 @@ class DFoTVideo(BasePytorchAlgo):
                     return_all=return_all,
                     pbar=pbar,
                 )
-                # new_pred, record = self._sample_sequence(
-                #     batch_size,
-                #     length=l,
-                #     context=context,
-                #     context_mask=context_mask,
-                #     conditions=cond_slice,
-                #     # goback_length=self.cfg.refinement_sampling.goback_length,
-                #     # n_goback=self.cfg.refinement_sampling.n_goback,
-                #     guidance_fn=guidance_fn,
-                #     reconstruction_guidance=reconstruction_guidance,
-                #     return_all=return_all,
-                #     pbar=pbar,
-                # )
             else:
                 new_pred, record = self._sample_sequence(
                     batch_size,

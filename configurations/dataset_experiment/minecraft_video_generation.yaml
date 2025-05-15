@@ -7,7 +7,7 @@
 
 dataset:
   latent:
-    enable: True
+    enabled: True
   subdataset_size: 64000
   num_eval_videos: 768
   max_frames: 50

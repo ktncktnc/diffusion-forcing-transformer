@@ -5,6 +5,7 @@ defaults:
   - base_video
 
 latent:
+  enabled: True
   suffix: 1cd9pgpb
 save_dir: /scratch/s224075134/temporal_diffusion/datasets/video/minecraft
 max_frames: 24

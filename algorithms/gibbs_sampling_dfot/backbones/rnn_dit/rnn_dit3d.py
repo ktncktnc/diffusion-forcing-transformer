@@ -71,11 +71,18 @@ class RNN_DiT3D(BaseBackbone):
 
         self.rnn = ConvLSTM(
             input_dim=self.in_channels,
-            hidden_dim=list(cfg.conv_lstm.hidden_dim) + [self.in_channels],
+            hidden_dim=list(cfg.conv_lstm.hidden_dim),
             kernel_size=cfg.conv_lstm.kernel_size,
             num_layers=cfg.conv_lstm.num_layers,
             batch_first=True,
             bias=True
+        )
+
+        self.output_conv = nn.Sequential(
+            nn.Conv2d(cfg.conv_lstm.hidden_dim[-1], cfg.conv_lstm.hidden_dim[-1], kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(cfg.conv_lstm.hidden_dim[-1], self.in_channels, kernel_size=3, padding=1),  # 3 output channels for RGB
+            # nn.Tanh()  # Scale to [-1, 1]
         )
         
         self.initialize_weights()
@@ -192,6 +199,9 @@ class RNN_DiT3D(BaseBackbone):
 
         # RNN
         x, _ = self.rnn(x)
+        x = rearrange(x, "b t c h w -> (b t) c h w")  # (B*T, C, H, W)
+        x = self.output_conv(x)
+        x = rearrange(x, "(b t) c h w -> b t c h w", b=input_batch_size)  # (B, T, C, H, W)
 
         return x
 

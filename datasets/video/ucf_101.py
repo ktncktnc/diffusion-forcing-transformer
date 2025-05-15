@@ -60,12 +60,14 @@ def _preprocess_video(
         )
         
         if preprocessed_video_path.exists():
-            # print(f"Preprocessed video already exists: {preprocessed_video_path}")
             return
+
         video = read_video(str(video_path))
         video = rescale_and_crop(video, resolution)
-        # create directory if it doesn't exist
-        video_path.parent.mkdir(parents=True, exist_ok=True)
+
+        parent_dir = preprocessed_video_path.parent
+        if not parent_dir.exists():
+            parent_dir.mkdir(parents=True, exist_ok=True)
 
         if preprocessing_type == "npz":               
             np.savez_compressed(
@@ -73,7 +75,6 @@ def _preprocess_video(
                 video=video.transpose(0, 3, 1, 2).copy(),
             )
         elif preprocessing_type == "mp4":
-            # write video
             write_video(
                 filename=preprocessed_video_path,
                 video_array=torch.from_numpy(video),
@@ -82,8 +83,6 @@ def _preprocess_video(
 
     except Exception as e:
         print(f"Error processing {video_path}: {e}")
-    # remove original video
-    # video_path.unlink()
 
 
 class UCF101BaseVideoDataset(BaseVideoDataset):
@@ -155,14 +154,14 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
         return paths
 
     def setup(self) -> None:
+        preprocessed_dir = self.save_dir / f"preprocessed_{self.resolution}_{self.cfg.video_preprocessing}"        
         if self.use_video_preprocessing:
-            # if not (
-            #     self.save_dir
-            #     / f"preprocessed_{self.resolution}_{self.cfg.video_preprocessing}"
-            # ).exists():
-            for split in ["training", "validation", "test"]:
-                print(f'Preprocessing videos for {split}...')
-                self._preprocess_videos(split)
+            # folder not exist or empty
+            if not preprocessed_dir.exists() or len(list(preprocessed_dir.glob("*"))) == 0:
+                for split in ["training", "validation", "test"]:
+                    print(f'Preprocessing videos for {split}...')
+                    self._preprocess_videos(split)
+
             self.metadata = self.exclude_failed_videos(self.metadata)
             self.transform = lambda x: x
 
@@ -175,10 +174,9 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
                 f"Preprocessing {split} videos to {self.resolution}x{self.resolution}..."
             )
         )
-        (
-            self.save_dir
-            / f"preprocessed_{self.resolution}_{self.cfg.video_preprocessing}"
-        ).mkdir(parents=True, exist_ok=True)
+        preprocessed_dir = self.save_dir / f"preprocessed_{self.resolution}_{self.cfg.video_preprocessing}"
+        preprocessed_dir.mkdir(parents=True, exist_ok=True)
+
         video_paths = torch.load(self.metadata_dir / f"{split}.pt", weights_only=False)
         video_paths = video_paths["video_paths"]
         preprocess_fn = partial(
@@ -186,7 +184,8 @@ class UCF101BaseVideoDataset(BaseVideoDataset):
             resolution=self.resolution,
             preprocessing_type=self.cfg.video_preprocessing
         )
-        with Pool(8) as pool, tqdm(total=len(video_paths), desc=f"Preprocessing {split} videos") as pbar:
+
+        with Pool(16) as pool, tqdm(total=len(video_paths), desc=f"Preprocessing {split} videos") as pbar:
             for result in pool.imap(preprocess_fn, video_paths):
                 pbar.update()
                 pbar.refresh()
@@ -353,11 +352,11 @@ class UCF101AdvancedVideoDataset(
         if cond is not None:
             cond = self._process_external_cond(cond)
 
-        augmented_video = self._augment(video) if video is not None else None
+        # augmented_video = self._augment(video) if video is not None else None
         
         output = {
             "videos": self.transform(video) if video is not None else None,
-            "augmented_videos": self.transform(augmented_video) if augmented_video is not None else None,
+            # "augmented_videos": self.transform(augmented_video) if augmented_video is not None else None,
             "latents": latent,
             "conds": cond,
             "nonterminal": nonterminal,

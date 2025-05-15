@@ -102,6 +102,9 @@ class ConvLSTM(nn.Module):
         # Make sure that both `kernel_size` and `hidden_dim` are lists having len == num_layers
         kernel_size = self._extend_for_multilayer(kernel_size, num_layers)
         hidden_dim = self._extend_for_multilayer(hidden_dim, num_layers)
+        print('kernel_size', kernel_size)
+        print('hidden_dim', hidden_dim)
+        print('num_layers', num_layers)
         if not len(kernel_size) == len(hidden_dim) == num_layers:
             raise ValueError('Inconsistent list length.')
 
@@ -159,31 +162,30 @@ class ConvLSTM(nn.Module):
             hidden_state = self._init_hidden(batch_size=b,
                                              image_size=(h, w))
 
-        layer_output_list = []
-        last_state_list = []
+        hs_all_layer = []
+        last_state_all_layer = []
 
         seq_len = input_tensor.size(1)
         cur_layer_input = input_tensor
 
         for layer_idx in range(self.num_layers):
             h, c = hidden_state[layer_idx]
-            output_inner = []
+            hs = []
             for t in range(seq_len):
-                h, c = self.cell_list[layer_idx](input_tensor=cur_layer_input[:, t, :, :, :],
-                                                 cur_state=[h, c])
-                output_inner.append(h)
+                h, c = self.cell_list[layer_idx](input_tensor=cur_layer_input[:, t, :, :, :], cur_state=[h, c])
+                hs.append(h)
 
-            layer_output = torch.stack(output_inner, dim=1)
-            cur_layer_input = layer_output
+            hs = torch.stack(hs, dim=1)
+            cur_layer_input = hs
 
-            layer_output_list.append(layer_output)
-            last_state_list.append([h, c])
+            hs_all_layer.append(hs)
+            last_state_all_layer.append([h, c])
 
         if not self.return_all_layers:
-            layer_output_list = layer_output_list[-1]
-            last_state_list = last_state_list[-1]
+            hs_all_layer = hs_all_layer[-1]
+            last_state_all_layer = last_state_all_layer[-1]
 
-        return layer_output_list, last_state_list
+        return hs_all_layer, last_state_all_layer
 
     def _init_hidden(self, batch_size, image_size):
         init_states = []

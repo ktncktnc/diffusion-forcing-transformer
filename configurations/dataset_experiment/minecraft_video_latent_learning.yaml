@@ -6,7 +6,7 @@
 
 dataset:
   latent:
-    enable: False
+    enabled: False
   max_frames: 2
   frame_skip: 150
   context_length: 0

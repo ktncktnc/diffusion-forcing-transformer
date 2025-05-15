@@ -14,13 +14,15 @@ launch_template: |
   #SBATCH -J {name}
   #SBATCH -o {log_dir}/out_%j.out
   #SBATCH -e {log_dir}/error_%j.err
+
   #SBATCH --qos=batch-short
   #SBATCH --ntasks-per-node=1
+  #SBATCH --gres=gpu:h100:1
+  #SBATCH --cpus-per-task=8
+  #SBATCH --mem-per-cpu=32G
+
   #SBATCH --mail-user={email}
   #SBATCH --mail-type=FAIL
-  #SBATCH --gres=gpu:{gpus}
-  #SBATCH --cpus-per-task={num_cpus}
-  #SBATCH --mem-per-cpu={memory}
   #SBATCH --time={time}
 
   source ~/.bashrc

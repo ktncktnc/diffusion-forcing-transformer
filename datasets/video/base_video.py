@@ -307,7 +307,7 @@ class BaseAdvancedVideoDataset(BaseVideoDataset):
     ):
         super().__init__(cfg, split)
         self.use_preprocessed_latents = (
-            cfg.latent.enable and cfg.latent.type.startswith("pre_")
+            cfg.latent.enabled and cfg.latent.type.startswith("pre_")
         )
         self.current_subepoch = current_epoch
         self.subdataset_size = cfg.subdataset_size

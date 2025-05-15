@@ -55,11 +55,11 @@ class UViT3D(BaseBackbone):
         # ------------------------------ Initialization ---------------------------------
 
         super().__init__(
-            cfg,
-            x_shape,
-            max_tokens,
-            external_cond_dim,
-            use_causal_mask,
+            cfg=cfg,
+            x_shape=x_shape,
+            max_tokens=max_tokens,
+            external_cond_dim=external_cond_dim,
+            use_causal_mask=use_causal_mask,
         )
 
         # -------------- Initial downsampling and final upsampling layers --------------

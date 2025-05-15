@@ -5,7 +5,7 @@ defaults:
   - base_video
 
 save_dir: /scratch/s224075134/temporal_diffusion/datasets/video/ucf101
-max_frames: 32
+max_frames: 16
 context_length: 5
 frame_skip: 1
 resolution: 64
@@ -28,11 +28,12 @@ augmentation:
   saturation: 0.3
 
 latent:
+  enabled: True
   num_channels: 32
-  downsampling_factor: [1, 8] 
-  enable: True
+  downsampling_factor: [1, 8] # [temporal, spatial]
   suffix: 9da18dcf
-  type: pre_9da18dcf
+  # type: pre_9da18dcf
+  type: online # online, pre_+suffix
 
 subdataset_size: null
 external_cond_dim: 0 # 0 if no external conditioning, 1 for label

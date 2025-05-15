@@ -13,7 +13,7 @@ dataset:
   num_eval_videos: 768
   subdataset_size: null
   latent:
-    enable: True
+    enabled: True
     suffix: 1a8547fb
     type: pre_sample
 
@@ -39,7 +39,7 @@ algorithm:
 
 experiment:
   ema:
-    enable: True
+    enabled: True
     decay: 0.999
   training:
     max_steps: 200000

@@ -28,7 +28,7 @@ algorithm:
   
 experiment:
   ema:
-    enable: True
+    enabled: True
     decay: 0.999
   training:
     max_steps: -1

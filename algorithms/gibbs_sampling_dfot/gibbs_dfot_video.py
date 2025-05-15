@@ -45,7 +45,7 @@ class GibbsDFoTVideo(BasePytorchAlgo):
         )
 
         # 2. Latent
-        self.is_latent_diffusion = cfg.latent.enable
+        self.is_latent_diffusion = cfg.latent.enabled
         self.is_latent_online = cfg.latent.type == "online"
         self.temporal_downsampling_factor = cfg.latent.downsampling_factor[0]
         self.is_latent_video_vae = self.temporal_downsampling_factor > 1

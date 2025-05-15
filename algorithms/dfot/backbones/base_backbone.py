@@ -16,9 +16,9 @@ class BaseBackbone(ABC, nn.Module):
         cfg: DictConfig,
         x_shape: torch.Size,
         max_tokens: int,
-        external_cond_type: str,
-        external_cond_num_classes: int,  # only for label
         external_cond_dim: int,
+        external_cond_type: str = 'action',
+        external_cond_num_classes: int = None,  # only for label
         use_causal_mask=True,
     ):
 
@@ -46,7 +46,7 @@ class BaseBackbone(ABC, nn.Module):
             return LabelEmbedding(
                 self.external_cond_num_classes,
                 self.external_cond_emb_dim,
-                dropout_prob=self.cfg.get("external_cond_dropout", 0.0),
+                dropout_prob=self.cfg.get("external_cond_dropout", 0.1),
             )
         elif self.external_cond_type == 'action':
             return RandomDropoutCondEmbedding(

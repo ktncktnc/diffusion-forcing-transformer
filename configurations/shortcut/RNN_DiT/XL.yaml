@@ -1,0 +1,9 @@
+algorithm:
+  backbone:
+    depth: 28
+    hidden_size: 1152
+    num_heads: 16
+    conv_lstm:
+      hidden_dim: [1024, 1024, 1024, 1024, 1024]
+      kernel_size: 3
+      num_layers: 5

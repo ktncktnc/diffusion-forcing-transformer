@@ -22,14 +22,15 @@ class UViT3DPose(UViT3D):
         max_tokens: int,
         external_cond_dim: int,
         use_causal_mask=True,
+        **kwargs
     ):
         self.conditioning_dropout = cfg.external_cond_dropout
         super().__init__(
-            cfg,
-            x_shape,
-            max_tokens,
-            cfg.conditioning.dim,
-            use_causal_mask,
+            cfg=cfg,
+            x_shape=x_shape,
+            max_tokens=max_tokens,
+            external_cond_dim=cfg.conditioning.dim,
+            use_causal_mask=use_causal_mask,
         )
 
     def _build_external_cond_embedding(self) -> Optional[nn.Module]:
