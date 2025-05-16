@@ -46,7 +46,7 @@ class BaseBackbone(ABC, nn.Module):
             return LabelEmbedding(
                 self.external_cond_num_classes,
                 self.external_cond_emb_dim,
-                dropout_prob=self.cfg.get("external_cond_dropout", 0.1),
+                dropout_prob=self.cfg.get("external_cond_dropout", 0.0),
             )
         elif self.external_cond_type == 'action':
             return RandomDropoutCondEmbedding(

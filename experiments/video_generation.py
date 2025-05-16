@@ -37,6 +37,7 @@ class VideoGenerationExperiment(BaseLightningExperiment):
         kinetics_600=Kinetics600AdvancedVideoDataset,
         ucf_101=UCF101AdvancedVideoDataset,
         cond_ucf_101=UCF101AdvancedVideoDataset,
+        cond_ucf_101_scaling=UCF101AdvancedVideoDataset,
         bair=BAIRAdvancedVideoDataset,
     )
 

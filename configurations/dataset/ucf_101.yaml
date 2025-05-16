@@ -32,8 +32,8 @@ latent:
   num_channels: 32
   downsampling_factor: [1, 8] # [temporal, spatial]
   suffix: 9da18dcf
-  # type: pre_9da18dcf
-  type: online # online, pre_+suffix
+  type: pre_9da18dcf
+  # type: online # online, pre_+suffix
 
 subdataset_size: null
 external_cond_dim: 0 # 0 if no external conditioning, 1 for label
