@@ -10,4 +10,4 @@ external_cond_dim: 1 # 0 if no external conditioning, 1 for label
 external_cond_processing: null
 external_cond_stack: false
 data_mean: [0.0]
-data_std: [0.2889]
+data_std: [3.46140533056]
