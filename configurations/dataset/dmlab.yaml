@@ -17,5 +17,5 @@ latent:
   suffix: 17035ae5
   num_channels: 32
   downsampling_factor: [1, 8] 
-  type: offline
+  type: pre_17035ae5
 subdataset_size: null

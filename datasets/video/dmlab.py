@@ -134,6 +134,6 @@ class DMLabAdvancedVideoDataset(
     def load_cond(
         self, video_metadata: Dict[str, Any], start_frame: int, end_frame: int
     ) -> torch.Tensor:
-        path = video_metadata["video_paths"].with_suffix(".npz")
+        path = video_metadata["video_paths"]
         actions = np.load(path)["actions"][start_frame:end_frame]
-        return torch.from_numpy(np.eye(4)[actions]).float()
+        return torch.from_numpy(np.eye(3)[actions]).float()

@@ -5,7 +5,8 @@ from datasets.video import (
     RealEstate10KMiniAdvancedVideoDataset,
     RealEstate10KOODAdvancedVideoDataset,
     UCF101AdvancedVideoDataset,
-    BAIRAdvancedVideoDataset
+    BAIRAdvancedVideoDataset,
+    DMLabAdvancedVideoDataset
 )
 from algorithms.dfot import DFoTVideo, DFoTVideoPose
 from algorithms.gibbs_sampling_dfot import GibbsDFoTVideo
@@ -39,6 +40,7 @@ class VideoGenerationExperiment(BaseLightningExperiment):
         cond_ucf_101=UCF101AdvancedVideoDataset,
         cond_ucf_101_scaling=UCF101AdvancedVideoDataset,
         bair=BAIRAdvancedVideoDataset,
+        dmlab=DMLabAdvancedVideoDataset
     )
 
     data_module_cls = _data_module_cls

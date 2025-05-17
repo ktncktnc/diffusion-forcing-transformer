@@ -4,6 +4,9 @@
 # When the (dataset, experiment) pair aligns with the file name of this yaml, 
 # the values here will override individual yamls files for dataset, algorithm and experiment.
 # useful for dataset-specific overrides
+defaults:
+  - ../algorithm/backbone@algorithm.backbone: dit3d
+  - ../algorithm@algorithm.vae: dc_ae_preprocessor
 
 dataset:
   latent:
@@ -15,9 +18,8 @@ algorithm:
   lr_scheduler:
     name: constant_with_warmup
     num_warmup_steps: 10000
-    num_training_steps: c
+    num_training_steps: 550000
   weight_decay: 0.001
-  compile: true_without_ddp_optimizer
   diffusion:
     loss_weighting:
       strategy: sigmoid
@@ -53,8 +55,8 @@ experiment:
       save_top_k: -1
   validation:
     batch_size: 16
-    val_every_n_step: 1.0
-    val_every_n_epoch: 1
+    val_every_n_step: 25000
+    val_every_n_epoch: null
     limit_batch: 50
     data:
       num_workers: 0
