@@ -200,7 +200,14 @@ class DiTBase(nn.Module):
             return checkpoint(module, *args, use_reentrant=False)
         return module(*args)
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+    def forward(
+            self, 
+            x: torch.Tensor, 
+            c: torch.Tensor, 
+            t: torch.Tensor = None,
+            height: int = None,
+            width: int = None
+        ) -> torch.Tensor:
         """
         Forward pass of the DiTBase model.
         Args:
@@ -287,7 +294,7 @@ class DiTBase(nn.Module):
         for i, (block, temporal_block) in enumerate(
             zip(self.blocks, self.temporal_blocks or [None for _ in range(self.depth)])
         ):
-            execute_in_parallel(lambda x, c, batch_size: self.checkpoint(block, x, c))
+            execute_in_parallel(lambda x, c, batch_size: self.checkpoint(block, x, c, t, height, width))
 
             if self.is_factorized:
                 execute_in_parallel(
@@ -300,7 +307,7 @@ class DiTBase(nn.Module):
                         lambda x, c, batch_size: self.temporal_pos_emb(x)
                     )
                 execute_in_parallel(
-                    lambda x, c, batch_size: self.checkpoint(temporal_block, x, c)
+                    lambda x, c, batch_size: self.checkpoint(temporal_block, x, c, t, height, width)
                 )
                 execute_in_parallel(
                     lambda x, c, batch_size: rearrange_contiguous_many(

@@ -25,3 +25,9 @@ new_argv ['/home/s224075134/diffusion-forcing-transformer/main.py', '+name=16f_d
 
 
 python -m main +name=single_image_to_short dataset=bair algorithm=dfot_video experiment=video_generation @DiT/B 'load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/bair/dfot_video/2025-04-26/14-13-45/checkpoints/last.ckpt' 'experiment.tasks=[validation]' experiment.validation.data.shuffle=False dataset.context_length=0 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional algorithm.logging.validate_generation=False
+
+
+python -m main +name=dmlab_4_to_16 dataset=dmlab algorithm=dfot_video experiment=video_generation @DiT/B 'load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-05-17/00-07-48/checkpoints/epoch\=0-step\=225000.ckpt' 'experiment.tasks=[validation]' experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=50 experiment.validation.batch_size=13 algorithm.tasks.prediction.history_guidance.name=conditional wandb.mode=disabled algorithm.diffusion.sampling_timesteps=5
+
+
+python -m main +name=single_image_to_short dataset=cond_ucf_101 algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/cond_ucf_101/dfot_video/2025-05-14/22-09-27/checkpoints/last.ckpt experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional

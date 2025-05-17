@@ -25,6 +25,7 @@ from .diffusion import (
     ContinuousDiffusion,
 )
 from .history_guidance import HistoryGuidance
+from algorithms.common.attn_hook import register_hooks, clear_hooks, save_attention_maps, attn_maps
 
 
 class DFoTVideo(BasePytorchAlgo):
@@ -380,6 +381,10 @@ class DFoTVideo(BasePytorchAlgo):
             all_videos = self._sample_all_videos(batch, batch_idx, namespace)
             self._update_metrics(all_videos)
             self._log_videos(all_videos, namespace)
+        
+        if self.cfg.save_attn_map.enabled:
+            # TODO: unconditional 
+            save_attention_maps(attn_maps, self.cfg.save_attn_map.attn_map_dir, False, batch_idx)
 
     def on_validation_epoch_start(self) -> None:
         if self.cfg.logging.deterministic is not None:
@@ -389,6 +394,9 @@ class DFoTVideo(BasePytorchAlgo):
             )
         if self.is_latent_diffusion and not self.is_latent_online:
             self._load_vae()
+        
+        if self.cfg.save_attn_map:
+            register_hooks(self.diffusion_model.model, True)
 
     def on_validation_epoch_end(self, namespace="validation") -> None:
         self.generator = None
@@ -407,6 +415,9 @@ class DFoTVideo(BasePytorchAlgo):
                 prog_bar=True,
                 sync_dist=True,
             )
+        
+        if self.cfg.save_attn_map:
+            clear_hooks(self.diffusion_model.model)
 
     def test_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
         return self.validation_step(*args, **kwargs, namespace="test")

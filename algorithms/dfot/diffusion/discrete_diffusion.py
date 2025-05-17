@@ -71,7 +71,7 @@ class DiscreteDiffusion(nn.Module):
             case "dit3d_pose":
                 model_cls = DiT3DPose
             case _:
-                raise ValueError(f"unknown model type {self.model_type}")
+                raise ValueError(f"unknown model type {self.backbone_cfg.name}")
         self.model = model_cls(
             cfg=self.backbone_cfg,
             x_shape=self.x_shape,

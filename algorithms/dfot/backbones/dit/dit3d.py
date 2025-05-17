@@ -131,6 +131,8 @@ class DiT3D(BaseBackbone):
         x = self.patch_embedder(x)
         x = rearrange(x, "(b t) p c -> b (t p) c", b=input_batch_size)
 
+        height, width = self.patch_embedder.grid_size
+
         emb = self.noise_level_pos_embedding(noise_levels)
 
         if external_cond is not None:
@@ -147,7 +149,7 @@ class DiT3D(BaseBackbone):
             
         emb = repeat(emb, "b t c -> b (t p) c", p=self.num_patches)
 
-        x = self.dit_base(x, emb)  # (B, N, C)
+        x = self.dit_base(x, emb, noise_levels, height, width)  # (B, N, C)
         
         x = self.unpatchify(
             rearrange(x, "b (t p) c -> (b t) p c", p=self.num_patches)

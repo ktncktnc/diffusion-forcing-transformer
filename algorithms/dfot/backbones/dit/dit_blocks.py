@@ -4,15 +4,44 @@ Adapted from https://github.com/facebookresearch/DiT/blob/main/models.py
 
 from typing import Tuple, Optional
 from functools import partial
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange, repeat
 from timm.models.vision_transformer import Mlp
 from ..modules.embeddings import RotaryEmbeddingND
 
 
 def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor):
     return x * (1 + scale) + shift
+
+
+# Efficient implementation equivalent to the following:
+def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
+    L, S = query.size(-2), key.size(-2)
+    scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+    attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+    if is_causal:
+        assert attn_mask is None
+        temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+        attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+        attn_bias.to(query.dtype)
+
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+        else:
+            attn_bias = attn_mask + attn_bias
+
+    if enable_gqa:
+        key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
+        value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
+
+    attn_weight = query @ key.transpose(-2, -1) * scale_factor
+    attn_weight += attn_bias
+    attn_weight = torch.softmax(attn_weight, dim=-1)
+    return torch.dropout(attn_weight, dropout_p, train=True) @ value, attn_weight
 
 
 class Attention(nn.Module):
@@ -47,8 +76,15 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
         self.rope = rope
+        
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        timestep=None,
+        height: int = None,
+        width: int = None
+    ) -> torch.Tensor:
         B, N, C = x.shape
         qkv = (
             self.qkv(x)
@@ -64,7 +100,7 @@ class Attention(nn.Module):
 
         if self.fused_attn:
             # pylint: disable-next=not-callable
-            x = F.scaled_dot_product_attention(
+            x, attn_map = scaled_dot_product_attention(
                 q,
                 k,
                 v,
@@ -72,10 +108,15 @@ class Attention(nn.Module):
             )
         else:
             q = q * self.scale
-            attn = q @ k.transpose(-2, -1)
-            attn = attn.softmax(dim=-1)
-            attn = self.attn_drop(attn)
-            x = attn @ v
+            attn_map = q @ k.transpose(-2, -1)
+            attn_map = attn_map.softmax(dim=-1) # shape: (B, num_heads, N, N)
+            x = self.attn_drop(attn_map) @ v
+
+        if hasattr(self, "store_attn_map"):
+            assert timestep is not None, "timestep must be provided for attention map storage"
+            assert height is not None and width is not None, "height and width must be provided for attention map storage"
+            self.timestep = timestep
+            self.attn_map = rearrange(attn_map, 'b heads (t h w) d -> b heads t h w d', h=height, w=width)
 
         x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
@@ -193,16 +234,25 @@ class DiTBlock(nn.Module):
         if self.use_mlp:
             self.mlp.apply(_basic_init)
 
-    def forward(self, x: torch.Tensor, c: torch.Tensor):
+    def forward(
+            self, 
+            x: torch.Tensor, 
+            c: torch.Tensor, 
+            t: torch.Tensor=None,
+            height: int = None,
+            width: int = None,
+        ) -> torch.Tensor:
         """
         Forward pass of the DiT block.
         In original implementation, conditioning is uniform across all tokens in the sequence. Here, we extend it to support token-wise conditioning (e.g. noise level can be different for each token).
-        Args:
+        Args:timesteps
             x: Input tensor of shape (B, N, C).
             c: Conditioning tensor of shape (B, N, C).
         """
+        n_frames = t.shape[-1]
+        
         x, gate_msa = self.norm1(x, c)
-        x = x + gate_msa * self.attn(x)
+        x = x + gate_msa * self.attn(x, t, height, width)
         if self.use_mlp:
             x, gate_mlp = self.norm2(x, c)
             x = x + gate_mlp * self.mlp(x)

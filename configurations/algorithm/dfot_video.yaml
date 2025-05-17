@@ -42,6 +42,10 @@ refinement_sampling:
   goback_length: 5
   n_goback: 5
 
+save_attn_map:
+  enabled: False
+  attn_map_dir: /scratch/s224075134/temporal_diffusion/diffusion-forcing-transformer/attn_map
+
 diffusion:
   is_continuous: False
   timesteps: 1000

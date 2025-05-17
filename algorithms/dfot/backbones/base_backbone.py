@@ -83,3 +83,7 @@ class BaseBackbone(ABC, nn.Module):
         external_cond_mask: Optional[torch.Tensor] = None,
     ):
         raise NotImplementedError
+
+    @property
+    def n_tokens_per_frame(self):
+        return self.x_shape[1] * self.x_shape[2] // (self.patch_size**2)
