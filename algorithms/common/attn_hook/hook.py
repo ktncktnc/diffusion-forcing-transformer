@@ -82,6 +82,9 @@ def save_attention_image(attn_map, n_frames, height, width, root_dir, layer_name
     attn_map = rearrange(attn_map, 'b (f h w) ... -> b f h w ...', f=n_frames, h=height, w=width)
     attn_map = torch.mean(attn_map, dim=(2,3))
     attn_map = torch.mean(attn_map, dim=(3,4)) # (batch, frame, frame)
+    attn_map = attn_map.permute(0, 2, 1) # (batch, frame, frame)
+    # normalize
+    attn_map = attn_map / attn_map.max(dim=-1, keepdim=True)[0]
 
     for i, a in enumerate(attn_map):
         batch_dir = os.path.join(root_dir, f'sample-{i}')
@@ -99,10 +102,9 @@ def save_attention_image(attn_map, n_frames, height, width, root_dir, layer_name
         heat_map = a.cpu().numpy()
         # plot heatmap
         plt.imshow(heat_map, cmap='viridis', interpolation='nearest')
-        plt.axis('off')
         # x title: query, y title: key
-        plt.xlabel('Query', fontsize=12)
-        plt.ylabel('Key', fontsize=12)
+        plt.xlabel('Key', fontsize=12)
+        plt.ylabel('Query', fontsize=12)
         plt.colorbar()
         plt.savefig(file_path, bbox_inches='tight', pad_inches=0)
         plt.close()

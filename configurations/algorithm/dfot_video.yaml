@@ -44,7 +44,7 @@ refinement_sampling:
 
 save_attn_map:
   enabled: False
-  attn_map_dir: /scratch/s224075134/temporal_diffusion/diffusion-forcing-transformer/attn_map
+  attn_map_dir: /scratch/s224075134/temporal_diffusion/diffusion-forcing-transformer/uncond_attn_map
 
 diffusion:
   is_continuous: False
