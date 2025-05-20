@@ -395,7 +395,7 @@ class DFoTVideo(BasePytorchAlgo):
         if self.is_latent_diffusion and not self.is_latent_online:
             self._load_vae()
         
-        if self.cfg.save_attn_map:
+        if self.cfg.save_attn_map.enabled:
             register_hooks(self.diffusion_model.model, True)
 
     def on_validation_epoch_end(self, namespace="validation") -> None:
