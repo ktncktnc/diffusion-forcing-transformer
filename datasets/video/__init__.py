@@ -16,3 +16,4 @@ from .realestate10k_mini import RealEstate10KMiniAdvancedVideoDataset
 from .ucf_101 import UCF101SimpleVideoDataset, UCF101AdvancedVideoDataset
 from .dmlab import DMLabSimpleVideoDataset, DMLabAdvancedVideoDataset
 from .bair import BAIRSimpleVideoDataset, BAIRAdvancedVideoDataset
+from .split_ucf_101 import SplitUCF101SimpleVideoDataset, SplitUCF101AdvancedVideoDataset

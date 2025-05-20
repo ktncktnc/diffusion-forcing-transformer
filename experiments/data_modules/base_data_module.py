@@ -31,6 +31,7 @@ class BaseDataModule(pl.LightningDataModule):
 
     def _dataloader(self, split: str) -> TRAIN_DATALOADERS | EVAL_DATALOADERS:
         dataset = self._build_dataset(split)
+        print(f"Dataset {split} has {len(dataset)} samples")
         split_cfg = self.exp_cfg[split]
 
         def pad_tensor(vec, pad, dim):

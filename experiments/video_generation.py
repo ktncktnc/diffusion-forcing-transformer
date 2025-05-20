@@ -5,6 +5,7 @@ from datasets.video import (
     RealEstate10KMiniAdvancedVideoDataset,
     RealEstate10KOODAdvancedVideoDataset,
     UCF101AdvancedVideoDataset,
+    SplitUCF101AdvancedVideoDataset,
     BAIRAdvancedVideoDataset,
     DMLabAdvancedVideoDataset
 )
@@ -39,6 +40,7 @@ class VideoGenerationExperiment(BaseLightningExperiment):
         ucf_101=UCF101AdvancedVideoDataset,
         cond_ucf_101=UCF101AdvancedVideoDataset,
         cond_ucf_101_scaling=UCF101AdvancedVideoDataset,
+        split_cond_ucf_101=SplitUCF101AdvancedVideoDataset,
         bair=BAIRAdvancedVideoDataset,
         dmlab=DMLabAdvancedVideoDataset
     )

@@ -183,12 +183,13 @@ class BaseVideoDataset(torch.utils.data.Dataset, ABC):
         """
         return None
 
-    def load_metadata(self) -> List[Dict[str, Any]]:
+    def load_metadata(self, split=None) -> List[Dict[str, Any]]:
         """
         Load metadata from metadata_dir
         """
+        split = split or self.split
         metadata = torch.load(
-            self.metadata_dir / f"{self.split}.pt", weights_only=False
+            self.metadata_dir / f"{split}.pt", weights_only=False
         )
         return [
             {key: metadata[key][i] for key in metadata.keys()}

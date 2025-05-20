@@ -291,6 +291,9 @@ class UCF101AdvancedVideoDataset(
     def on_before_prepare_clips(self) -> None:
         self.setup()
 
+    def __len__(self) -> int:
+        return BaseAdvancedVideoDataset.__len__(self)
+
     def setup(self) -> None:
         super().setup()
 
