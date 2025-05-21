@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 test/
 old_outputs/
+data/README.md
 
 # C extensions
 *.so
@@ -167,3 +168,21 @@ data
 
 # huggingface
 huggingface/
+cond_attn_map_causal
+slurm_logs/latest
+configurations/dataset_experiment/realestate10k_mini_video_generation.yaml
+data
+cond_attn_map
+uncond_attn_map
+venv/lib64
+venv/bin/python3
+venv/bin/python3.10
+venv/bin/python
+outputs/outputs
+huggingface/models--kiwhansong--DFoT/snapshots/b430f0e9efc126b151d5b2c4a3b468ab3fc22b78/config.json
+huggingface/models--kiwhansong--DFoT/snapshots/b430f0e9efc126b151d5b2c4a3b468ab3fc22b78/pretrained_models/ImageVAE_MCRAFT.ckpt
+huggingface/models--kiwhansong--DFoT/snapshots/b430f0e9efc126b151d5b2c4a3b468ab3fc22b78/pretrained_models/DFoT_RE10K.ckpt
+huggingface/models--kiwhansong--DFoT/snapshots/b430f0e9efc126b151d5b2c4a3b468ab3fc22b78/metrics_models/i3d_torchscript.pt
+huggingface/models--kiwhansong--DFoT/snapshots/b430f0e9efc126b151d5b2c4a3b468ab3fc22b78/metrics_models/raft-things.pth
+test/huggingface/models--kiwhansong--DFoT/snapshots/b430f0e9efc126b151d5b2c4a3b468ab3fc22b78/metrics_models/i3d_torchscript.pt
+test/huggingface/models--kiwhansong--DFoT/snapshots/b430f0e9efc126b151d5b2c4a3b468ab3fc22b78/metrics_models/raft-things.pth
