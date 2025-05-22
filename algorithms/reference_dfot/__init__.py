@@ -1,2 +1,2 @@
-from .dfot_video import DFoTVideo
-from .dfot_video_pose import DFoTVideoPose
+from .reference_dfot_video import ReferenceDFoTVideo
+# from .dfot_video_pose import DFoTVideoPose

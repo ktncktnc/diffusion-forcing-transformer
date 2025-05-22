@@ -147,6 +147,9 @@ class DiTBase(nn.Module):
             else None
         )
 
+        # TODO: should we add reference in final layer?
+        # TODO: should we add reference in final layer?
+        # TODO: should we add reference in final layer?
         self.final_layer = DITFinalLayer(hidden_size, self.out_channels)
 
     @property
@@ -204,6 +207,7 @@ class DiTBase(nn.Module):
             self, 
             x: torch.Tensor, 
             c: torch.Tensor, 
+            reference: torch.Tensor,
             t: torch.Tensor = None,
             height: int = None,
             width: int = None
@@ -213,9 +217,16 @@ class DiTBase(nn.Module):
         Args:
             x: Input tensor of shape (B, N, C).
             c: Conditioning tensor of shape (B, N, C).
+            reference: Reference tensor of shape (B, n_token_per_frame, C).
+            N = n_frames * n_token_per_frame
         Returns:
             Output tensor of shape (B, N, OC).
         """
+        #TODO: should we add positional embedding to reference?
+        #TODO: should we add positional embedding to reference?
+        #TODO: should we add positional embedding to reference?
+        #TODO: should we add positional embedding to reference?
+
         x_img = None
         if x.size(1) > self.max_tokens:
             if not self.training or self.num_patches is None:
@@ -238,7 +249,7 @@ class DiTBase(nn.Module):
         seq_batch_size = x.size(0)
         img_batch_size = x_img.size(0) if x_img is not None else None
 
-        seq_states = {"x": x, "c": c, "batch_size": seq_batch_size}
+        seq_states = {"x": x, "c": c, "reference": reference, "batch_size": seq_batch_size}
         img_states = (
             {"x": x_img, "c": c_img, "batch_size": img_batch_size}
             if x_img is not None
@@ -252,26 +263,26 @@ class DiTBase(nn.Module):
             ]
         ):
             """execute a function in parallel on the sequence and image tensors"""
-            seq_result = fn(seq_states["x"], seq_states["c"], seq_states["batch_size"])
+            seq_result = fn(seq_states["x"], seq_states["c"], seq_states["reference"], seq_states["batch_size"])
             if isinstance(seq_result, tuple):
-                seq_states["x"], seq_states["c"] = seq_result
+                seq_states["x"], seq_states["reference"] = seq_result
             else:
                 seq_states["x"] = seq_result
             if img_states is not None:
                 img_result = fn(
-                    img_states["x"], img_states["c"], img_states["batch_size"]
+                    img_states["x"], img_states["c"], img_states["reference"], img_states["batch_size"]
                 )
                 if isinstance(img_result, tuple):
-                    img_states["x"], img_states["c"] = img_result
+                    img_states["x"], img_states["reference"] = img_result
                 else:
                     img_states["x"] = img_result
 
         if self.is_pos_emb_absolute_once:
-            execute_in_parallel(lambda x, c, batch_size: self.pos_emb(x))
-        if self.is_pos_emb_absolute_factorized and not self.is_factorized:
+            execute_in_parallel(lambda x, c, reference, batch_size: self.pos_emb(x))
 
+        if self.is_pos_emb_absolute_factorized and not self.is_factorized:
             def add_pos_emb(
-                x: torch.Tensor, _: torch.Tensor, batch_size: int
+                x: torch.Tensor, _: torch.Tensor, reference: torch.Tensor, batch_size: int
             ) -> torch.Tensor:
                 x = rearrange(x, "b (t p) c -> (b t) p c", p=self.num_patches)
                 x = self.spatial_pos_emb(x)
@@ -284,44 +295,44 @@ class DiTBase(nn.Module):
 
         if self.is_factorized:
             execute_in_parallel(
-                lambda x, c, batch_size: rearrange_contiguous_many(
+                lambda x, c, reference, batch_size: rearrange_contiguous_many(
                     (x, c), "b (t p) c -> (b t) p c", p=self.num_patches
                 )
             )
             if self.is_pos_emb_absolute_factorized:
-                execute_in_parallel(lambda x, c, batch_size: self.spatial_pos_emb(x))
+                execute_in_parallel(lambda x, c, reference, batch_size: self.spatial_pos_emb(x))
 
         for i, (block, temporal_block) in enumerate(
             zip(self.blocks, self.temporal_blocks or [None for _ in range(self.depth)])
         ):
-            execute_in_parallel(lambda x, c, batch_size: self.checkpoint(block, x, c, t, height, width))
+            execute_in_parallel(lambda x, c, reference, batch_size: self.checkpoint(block, x, c, reference, t, height, width))
 
             if self.is_factorized:
                 execute_in_parallel(
-                    lambda x, c, batch_size: rearrange_contiguous_many(
+                    lambda x, c, reference, batch_size: rearrange_contiguous_many(
                         (x, c), "(b t) p c -> (b p) t c", b=batch_size
                     )
                 )
                 if i == 0 and self.pos_emb_type == "sinusoidal_factorized":
                     execute_in_parallel(
-                        lambda x, c, batch_size: self.temporal_pos_emb(x)
+                        lambda x, c, reference, batch_size: self.temporal_pos_emb(x)
                     )
                 execute_in_parallel(
-                    lambda x, c, batch_size: self.checkpoint(temporal_block, x, c, t, height, width)
+                    lambda x, c, reference, batch_size: self.checkpoint(temporal_block, x, c, reference, t, height, width)
                 )
                 execute_in_parallel(
-                    lambda x, c, batch_size: rearrange_contiguous_many(
+                    lambda x, c, reference, batch_size: rearrange_contiguous_many(
                         (x, c), "(b p) t c -> (b t) p c", b=batch_size
                     )
                 )
         if self.is_factorized:
             execute_in_parallel(
-                lambda x, c, batch_size: rearrange_contiguous_many(
+                lambda x, c, reference, batch_size: rearrange_contiguous_many(
                     (x, c), "(b t) p c -> b (t p) c", b=batch_size
                 )
             )
 
-        execute_in_parallel(lambda x, c, batch_size: self.final_layer(x, c))
+        execute_in_parallel(lambda x, c, reference, batch_size: self.final_layer(x, c))
 
         x = seq_states["x"]
         x_img = img_states["x"] if img_states is not None else None

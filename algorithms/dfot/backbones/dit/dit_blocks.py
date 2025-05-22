@@ -235,13 +235,13 @@ class DiTBlock(nn.Module):
             self.mlp.apply(_basic_init)
 
     def forward(
-            self, 
-            x: torch.Tensor, 
-            c: torch.Tensor, 
-            t: torch.Tensor=None,
-            height: int = None,
-            width: int = None,
-        ) -> torch.Tensor:
+        self, 
+        x: torch.Tensor, 
+        c: torch.Tensor, 
+        t: torch.Tensor=None,
+        height: int = None,
+        width: int = None,
+    ) -> torch.Tensor:
         """
         Forward pass of the DiT block.
         In original implementation, conditioning is uniform across all tokens in the sequence. Here, we extend it to support token-wise conditioning (e.g. noise level can be different for each token).

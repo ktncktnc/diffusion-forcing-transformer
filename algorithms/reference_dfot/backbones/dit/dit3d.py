@@ -123,13 +123,21 @@ class DiT3D(BaseBackbone):
         self,
         x: torch.Tensor,
         noise_levels: torch.Tensor,
+        reference: torch.Tensor,
         external_cond: Optional[torch.Tensor] = None,
         external_cond_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        """
+        x: (B, T, C, H, W) - input tensor
+        noise_levels: (B, T) - noise levels for each time step
+        reference: (B, C, H, W) - reference tensor
+        """
         input_batch_size = x.shape[0]
         x = rearrange(x, "b t c h w -> (b t) c h w")
         x = self.patch_embedder(x)
         x = rearrange(x, "(b t) p c -> b (t p) c", b=input_batch_size)
+
+        reference = self.patch_embedder(reference)
 
         height, width = self.patch_embedder.grid_size
 
@@ -149,7 +157,7 @@ class DiT3D(BaseBackbone):
             
         emb = repeat(emb, "b t c -> b (t p) c", p=self.num_patches)
 
-        x = self.dit_base(x, emb, noise_levels, height, width)  # (B, N, C)
+        x = self.dit_base(x, emb, reference, noise_levels, height, width)  # (B, N, C)
         
         x = self.unpatchify(
             rearrange(x, "b (t p) c -> (b t) p c", p=self.num_patches)

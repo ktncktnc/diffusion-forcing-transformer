@@ -28,7 +28,7 @@ from .history_guidance import HistoryGuidance
 from algorithms.common.attn_hook import register_hooks, clear_hooks, save_attention_maps, attn_maps
 
 
-class DFoTVideo(BasePytorchAlgo):
+class ReferenceDFoTVideo(BasePytorchAlgo):
     """
     An algorithm for training and evaluating
     Diffusion Forcing Transformer (DFoT) for video generation.
@@ -302,9 +302,18 @@ class DFoTVideo(BasePytorchAlgo):
             xs = batch["videos"]
         # TODO: should we normalize??
         xs = self._normalize_x(xs)
+        # Split reference
+        reference = xs[:, 0, ...]
+        xs = xs[:, 1:, ...]
+        gt_videos = gt_videos[:, 1:, ...] if gt_videos is not None else None
 
         # 2. Prepare external conditions
         conditions = batch.get("conds", None)
+
+        if self.external_cond_type == "label":
+            conditions = conditions
+        elif self.external_cond_type == "action":
+            conditions = conditions[:, 1:, ...]
 
         # 3. Prepare the masks
         if "masks" in batch:
@@ -314,7 +323,7 @@ class DFoTVideo(BasePytorchAlgo):
         else:
             masks = torch.ones(*xs.shape[:2]).bool().to(self.device)
 
-        return xs, conditions, masks, gt_videos
+        return xs, conditions, reference, masks, gt_videos
 
     # ---------------------------------------------------------------------
     # Training
@@ -323,25 +332,19 @@ class DFoTVideo(BasePytorchAlgo):
     def training_step(self, batch, batch_idx, namespace="training") -> STEP_OUTPUT:
         """
         Training step
-        Use first frame as reference. If context_frames > 1, use num_context_frames - 1 frames as context.
+        Use first frame or context_frames as reference.
         """
-        all_xs, all_conditions, all_masks, *_ = batch
+        xs, conditions, reference, masks, *_ = batch
 
-        reference = all_xs[:, 0, ...]
-        xs = all_xs[:, 1:, ...]
-
-        if self.external_cond_type == "label":
-            conditions = all_conditions
-        elif self.external_cond_type == "action":
-            conditions = all_conditions[:, 1:, ...]
-
-        masks = all_masks[:, 1:, ...]
+        if self.cfg.reference.predict_difference:
+            xs = xs - repeat(reference.unsqueeze(1), 'b n ... -> b (n n_frame) ...', n_frame=xs.shape[1])
 
         noise_levels, masks = self._get_training_noise_levels(xs, masks)
         xs_pred, loss = self.diffusion_model(
             xs,
             self._process_conditions(conditions),
             k=noise_levels,
+            reference=reference,
         )
         loss = self._reweight_loss(loss, masks)
 
@@ -353,6 +356,10 @@ class DFoTVideo(BasePytorchAlgo):
                 on_epoch=namespace != "training",
                 sync_dist=True,
             )
+
+        if self.cfg.reference.predict_difference:
+            xs = xs + repeat(reference.unsqueeze(1), 'b n ... -> b (n n_frame) ...', n_frame=xs.shape[1])
+            xs_pred = xs_pred + repeat(reference.unsqueeze(1), 'b n ... -> b (n n_frame) ...', n_frame=xs.shape[1])
 
         xs, xs_pred = map(self._unnormalize_x, (xs, xs_pred))
 
@@ -447,7 +454,7 @@ class DFoTVideo(BasePytorchAlgo):
 
     def _eval_denoising(self, batch, batch_idx, namespace="training") -> None:
         """Evaluate the denoising performance during training."""
-        xs, conditions, masks, gt_videos = batch
+        xs, conditions, reference, masks, gt_videos = batch
 
         xs = xs[:, : self.max_tokens]
         if conditions is not None:
@@ -466,7 +473,7 @@ class DFoTVideo(BasePytorchAlgo):
         if gt_videos is not None:
             gt_videos = gt_videos[:, : self.max_frames]
 
-        batch = (xs, conditions, masks, gt_videos)
+        batch = (xs, conditions, reference, masks, gt_videos)
         output = self.training_step(batch, batch_idx, namespace=namespace)
 
         gt_videos = output["xs"]
@@ -511,8 +518,11 @@ class DFoTVideo(BasePytorchAlgo):
     def _sample_all_videos(
         self, batch, batch_idx, namespace="validation"
     ) -> Optional[Dict[str, Tensor]]:
-        xs, conditions, *_, gt_videos = batch
+        xs, conditions, reference, *_, gt_videos = batch
         all_videos: Dict[str, Tensor] = {"gt": xs}
+        
+        if self.cfg.reference.predict_difference:
+            xs = xs - repeat(reference.unsqueeze(1), 'b n ... -> b (n n_frame) ...', n_frame=xs.shape[1])
 
         for task in self.tasks:
             sample_fn = (
@@ -520,12 +530,17 @@ class DFoTVideo(BasePytorchAlgo):
                 if task == "prediction"
                 else self._interpolate_videos
             )
-            all_videos[task] = sample_fn(xs, conditions=conditions)
+            generated = sample_fn(xs, reference=reference, conditions=conditions)
+            if self.cfg.reference.predict_difference:
+                generated = generated + repeat(reference.unsqueeze(1), 'b n ... -> b (n n_frame) ...', n_frame=xs.shape[1])
+            all_videos[task] = generated
 
         # remove None values
         all_videos = {k: v for k, v in all_videos.items() if v is not None}
+
         # rearrange/unnormalize/detach the videos
         all_videos = {k: self._unnormalize_x(v).detach() for k, v in all_videos.items()}
+
         # decode latents if using latents
         if self.is_latent_diffusion:
             if gt_videos is None:
@@ -544,7 +559,7 @@ class DFoTVideo(BasePytorchAlgo):
         return all_videos
 
     def _predict_videos(
-        self, xs: Tensor, conditions: Optional[Tensor] = None
+        self, xs: Tensor, reference: Tensor, conditions: Optional[Tensor] = None
     ) -> Tensor:
         """
         Predict the videos with the given context, using sliding window rollouts if necessary.
@@ -588,6 +603,7 @@ class DFoTVideo(BasePytorchAlgo):
         xs_pred_key, *_ = self._predict_sequence(
             xs_pred[:, : self.n_context_tokens],
             length=len(keyframe_indices),
+            reference=reference,
             conditions=key_conditions,
             history_guidance=history_guidance,
             reconstruction_guidance=self.cfg.diffusion.reconstruction_guidance,
@@ -604,6 +620,7 @@ class DFoTVideo(BasePytorchAlgo):
             context_mask[:, keyframe_indices] = True
             xs_pred = self._interpolate_videos(
                 context=xs_pred,
+                reference=reference,
                 context_mask=context_mask,
                 conditions=conditions,
             )
@@ -631,6 +648,7 @@ class DFoTVideo(BasePytorchAlgo):
     def _interpolate_videos(
         self,
         context: Tensor,
+        reference: Tensor,
         context_mask: Optional[Tensor] = None,
         conditions: Optional[Tensor] = None,
     ) -> Tensor:
@@ -781,6 +799,7 @@ class DFoTVideo(BasePytorchAlgo):
                     xs_pred_chunk, _ = self._sample_sequence_refine(
                         batch_size=batch_size,
                         context=current_context_chunk,
+                        reference=reference,
                         goback_length=self.cfg.refinement_sampling.goback_length,
                         n_goback=self.cfg.refinement_sampling.n_goback,
                         context_mask=current_context_mask_chunk.long(),
@@ -791,6 +810,7 @@ class DFoTVideo(BasePytorchAlgo):
                 else:
                     xs_pred_chunk, _ = self._sample_sequence(
                         batch_size=batch_size,
+                        reference=reference,
                         context=current_context_chunk,
                         context_mask=current_context_mask_chunk.long(),
                         conditions=current_conditions_chunk,
@@ -824,7 +844,7 @@ class DFoTVideo(BasePytorchAlgo):
         for task in self.tasks:
             metric = self._metrics(task)
             videos = all_videos[task]
-            context_mask = torch.zeros(self.n_frames).bool().to(self.device)
+            context_mask = torch.zeros(videos.shape[1]).bool().to(self.device)
             match task:
                 case "prediction":
                     context_mask[: self.n_context_frames] = True
@@ -1083,6 +1103,7 @@ class DFoTVideo(BasePytorchAlgo):
     def _predict_sequence(
         self,
         context: torch.Tensor,
+        reference: torch.Tensor,
         length: Optional[int] = None,
         conditions: Optional[torch.Tensor] = None,
         guidance_fn: Optional[Callable] = None,
@@ -1202,6 +1223,7 @@ class DFoTVideo(BasePytorchAlgo):
                 new_pred, record = self._sample_sequence_refine(
                     batch_size,
                     length=l,
+                    reference=reference,
                     context=context,
                     context_mask=context_mask,
                     conditions=cond_slice,
@@ -1216,6 +1238,7 @@ class DFoTVideo(BasePytorchAlgo):
                 new_pred, record = self._sample_sequence(
                     batch_size,
                     length=l,
+                    reference=reference,
                     context=context,
                     context_mask=context_mask,
                     conditions=cond_slice,
@@ -1237,6 +1260,7 @@ class DFoTVideo(BasePytorchAlgo):
     def _sample_sequence(
         self,
         batch_size: int,
+        reference: torch.Tensor,
         length: Optional[int] = None,
         context: Optional[torch.Tensor] = None,
         context_mask: Optional[torch.Tensor] = None,
@@ -1447,6 +1471,7 @@ class DFoTVideo(BasePytorchAlgo):
                 # update xs_pred by DDIM or DDPM sampling
                 xs_pred = self.diffusion_model.sample_step(
                     xs_pred,
+                    reference,
                     from_noise_levels,
                     to_noise_levels,
                     self._process_conditions(
@@ -1484,6 +1509,7 @@ class DFoTVideo(BasePytorchAlgo):
     def _sample_sequence_refine(
         self,
         batch_size: int,
+        reference: torch.Tensor,
         goback_length: int,
         n_goback: int,
         length: Optional[int] = None,
@@ -1649,6 +1675,7 @@ class DFoTVideo(BasePytorchAlgo):
                 # update xs_pred by DDIM or DDPM sampling
                 xs_pred = self.diffusion_model.sample_step(
                     xs_pred,
+                    reference,
                     from_noise_levels,
                     to_noise_levels,
                     self._process_conditions(

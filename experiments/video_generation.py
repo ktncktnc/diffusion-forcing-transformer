@@ -11,7 +11,7 @@ from datasets.video import (
 )
 from algorithms.dfot import DFoTVideo, DFoTVideoPose
 from algorithms.gibbs_sampling_dfot import GibbsDFoTVideo
-from algorithms.contrastive_dfot import ContrastiveDFoTVideo
+from algorithms.reference_dfot import ReferenceDFoTVideo
 from .base_exp import BaseLightningExperiment
 from .data_modules.utils import _data_module_cls
 
@@ -25,7 +25,7 @@ class VideoGenerationExperiment(BaseLightningExperiment):
         dfot_video=DFoTVideo,
         dfot_video_pose=DFoTVideoPose,
         gibbs_dfot_video=GibbsDFoTVideo,
-        contrastive_dfot_video=ContrastiveDFoTVideo,
+        reference_dfot_video=ReferenceDFoTVideo,
         sd_video=DFoTVideo,
         sd_video_3d=DFoTVideoPose,
     )

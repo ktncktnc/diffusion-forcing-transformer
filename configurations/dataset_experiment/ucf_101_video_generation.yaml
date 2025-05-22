@@ -10,7 +10,7 @@ defaults:
   - ../algorithm@algorithm.vae: dc_ae_preprocessor
 
 dataset:
-  num_eval_videos: 1000
+  # num_eval_videos: 1000
   subdataset_size: null
   latent:
     enabled: True

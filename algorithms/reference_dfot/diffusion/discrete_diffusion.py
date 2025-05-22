@@ -161,8 +161,8 @@ class DiscreteDiffusion(nn.Module):
     def add_shape_channels(self, x):
         return rearrange(x, f"... -> ...{' 1' * len(self.x_shape)}")
 
-    def model_predictions(self, x, k, external_cond=None, external_cond_mask=None):
-        model_output = self.model(x, k, external_cond, external_cond_mask)
+    def model_predictions(self, x, k, reference, external_cond=None, external_cond_mask=None):
+        model_output = self.model(x, k, reference, external_cond, external_cond_mask)
 
         if self.objective == "pred_noise":
             pred_noise = torch.clamp(model_output, -self.clip_noise, self.clip_noise)
@@ -250,9 +250,9 @@ class DiscreteDiffusion(nn.Module):
         scale = torch.where(next_noise_levels[..., None, None, None] == 999, 1.0, scale)
         return torch.sqrt(scale) * x_k + torch.sqrt(1 - scale) * noise
 
-    def p_mean_variance(self, x, k, external_cond=None, external_cond_mask=None):
+    def p_mean_variance(self, x, k, reference, external_cond=None, external_cond_mask=None):
         model_pred = self.model_predictions(
-            x=x, k=k, external_cond=external_cond, external_cond_mask=external_cond_mask
+            x=x, k=k, reference=reference, external_cond=external_cond, external_cond_mask=external_cond_mask
         )
         x_start = model_pred.pred_x_start
         return self.q_posterior(x_start=x_start, x_k=x, k=k)
@@ -338,13 +338,14 @@ class DiscreteDiffusion(nn.Module):
         x: torch.Tensor,
         external_cond: Optional[torch.Tensor],
         k: torch.Tensor,
+        reference: torch.Tensor
     ):
         noise = torch.randn_like(x)
         noise = torch.clamp(noise, -self.clip_noise, self.clip_noise)
 
         noised_x = self.q_sample(x_start=x, k=k, noise=noise)
         model_pred = self.model_predictions(
-            x=noised_x, k=k, external_cond=external_cond
+            x=noised_x, k=k, reference=reference, external_cond=external_cond
         )
 
         pred = model_pred.model_out
@@ -377,6 +378,7 @@ class DiscreteDiffusion(nn.Module):
     def sample_step(
         self,
         x: torch.Tensor,
+        reference: torch.Tensor,
         curr_noise_level: torch.Tensor,
         next_noise_level: torch.Tensor,
         external_cond: Optional[torch.Tensor],
@@ -386,6 +388,7 @@ class DiscreteDiffusion(nn.Module):
         if self.is_ddim_sampling:
             return self.ddim_sample_step(
                 x=x,
+                reference=reference,
                 curr_noise_level=curr_noise_level,
                 next_noise_level=next_noise_level,
                 external_cond=external_cond,
@@ -405,6 +408,7 @@ class DiscreteDiffusion(nn.Module):
 
         return self.ddpm_sample_step(
             x=x,
+            reference=reference,
             curr_noise_level=curr_noise_level,
             external_cond=external_cond,
             external_cond_mask=external_cond_mask,
@@ -414,6 +418,7 @@ class DiscreteDiffusion(nn.Module):
     def ddpm_sample_step(
         self,
         x: torch.Tensor,
+        reference: torch.Tensor,
         curr_noise_level: torch.Tensor,
         external_cond: Optional[torch.Tensor],
         external_cond_mask: Optional[torch.Tensor] = None,
@@ -426,6 +431,7 @@ class DiscreteDiffusion(nn.Module):
 
         model_mean, _, model_log_variance = self.p_mean_variance(
             x=x,
+            reference=reference,
             k=clipped_curr_noise_level,
             external_cond=external_cond,
             external_cond_mask=external_cond_mask,
@@ -445,6 +451,7 @@ class DiscreteDiffusion(nn.Module):
     def ddim_sample_step(
         self,
         x: torch.Tensor,
+        reference: torch.Tensor,
         curr_noise_level: torch.Tensor,
         next_noise_level: torch.Tensor,
         external_cond: Optional[torch.Tensor],
@@ -480,6 +487,7 @@ class DiscreteDiffusion(nn.Module):
                 model_pred = self.model_predictions(
                     x=x,
                     k=clipped_curr_noise_level,
+                    reference=reference,
                     external_cond=external_cond,
                     external_cond_mask=external_cond_mask,
                 )
@@ -507,6 +515,7 @@ class DiscreteDiffusion(nn.Module):
             model_pred = self.model_predictions(
                 x=x,
                 k=clipped_curr_noise_level,
+                reference=reference,
                 external_cond=external_cond,
                 external_cond_mask=external_cond_mask,
             )
