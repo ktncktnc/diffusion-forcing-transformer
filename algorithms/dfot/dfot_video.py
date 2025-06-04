@@ -14,7 +14,7 @@ from transformers import get_scheduler
 from tqdm import tqdm
 from algorithms.common.base_pytorch_algo import BasePytorchAlgo
 from algorithms.common.metrics.video import VideoMetric, SharedVideoMetricModelRegistry
-from algorithms.vae import ImageVAE, VideoVAE, MyAutoencoderDC
+from algorithms.vae import ImageVAE, VideoVAE, MyAutoencoderDC, AutoencoderKL
 from utils.print_utils import cyan
 from utils.distributed_utils import rank_zero_print, is_rank_zero
 from utils.torch_utils import bernoulli_tensor
@@ -84,6 +84,13 @@ class DFoTVideo(BasePytorchAlgo):
 
         super().__init__(cfg)
 
+        if self.is_latent_diffusion:
+            if (not hasattr(self, 'vae')) or (self.vae is None):
+                self._load_vae()
+            
+            self.vae_scaling_factor = self.vae.config.scaling_factor
+            self.vae = None
+
     # ---------------------------------------------------------------------
     # Prepare Model, Optimizer, and Metrics
     # ---------------------------------------------------------------------
@@ -121,7 +128,6 @@ class DFoTVideo(BasePytorchAlgo):
             disable=not self.cfg.compile,
         )
         print('self.diffusion_model', self.diffusion_model)
-        self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
 
         # 2. VAE model
         if self.is_latent_diffusion and self.is_latent_online:
@@ -190,6 +196,10 @@ class DFoTVideo(BasePytorchAlgo):
                     torch.float16 if self.cfg.vae.use_fp16 else torch.float32
                 ),
                 **self.cfg.vae.pretrained_kwargs
+            ).to(self.device)
+        elif hasattr(self.cfg.vae, 'name') and self.cfg.vae.name == "kl_autoencoder":
+            self.vae = AutoencoderKL.from_pretrained(
+                **self.cfg.vae
             ).to(self.device)
         else:
             vae_cls = VideoVAE if self.is_latent_video_vae else ImageVAE
@@ -300,7 +310,7 @@ class DFoTVideo(BasePytorchAlgo):
                 gt_videos = batch["videos"]
         else:
             xs = batch["videos"]
-        # TODO: should we normalize??
+
         xs = self._normalize_x(xs)
 
         # 2. Prepare external conditions
@@ -1717,6 +1727,8 @@ class DFoTVideo(BasePytorchAlgo):
     def _encode(self, x: Tensor, shape: str = "b t c h w") -> Tensor:
         if isinstance(self.vae, MyAutoencoderDC):
             fn = lambda y: self.vae.encode(2.0 * y - 1.0)
+        elif isinstance(self.vae, AutoencoderKL):
+            fn = lambda y: self.vae.encode(2.0 * y - 1.0, return_dict=False)[0].sample()
         else:
             fn = lambda y: self.vae.encode(2.0 * y - 1.0).sample()
         return self._run_vae(x, shape, fn)
@@ -1727,6 +1739,12 @@ class DFoTVideo(BasePytorchAlgo):
                 latents,
                 shape,
                 lambda y: self.vae.decode(y) * 0.5 + 0.5
+            )
+        elif isinstance(self.vae, AutoencoderKL):
+            return self._run_vae(
+                latents,
+                shape,
+                lambda y: self.vae.decode(y, return_dict=False)[0] * 0.5 + 0.5
             )
 
         return self._run_vae(
@@ -1742,16 +1760,20 @@ class DFoTVideo(BasePytorchAlgo):
         )
 
     def _normalize_x(self, xs):
-        shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
-        mean = self.data_mean.reshape(shape)
-        std = self.data_std.reshape(shape)
-        return (xs - mean) / std
+        if self.is_latent_diffusion:
+            # Input is in range [-1, 1], scaled by vae scaling factor
+            return xs * 1 / self.vae_scaling_factor
+        else:
+            # Input is in range [0, 1], scaled to [-1, 1]
+            return xs * 2 - 1
 
     def _unnormalize_x(self, xs):
-        shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
-        mean = self.data_mean.reshape(shape)
-        std = self.data_std.reshape(shape)
-        return xs * std + mean
+        if self.is_latent_diffusion:
+            # Input is in range [-1, 1], scaled by vae scaling factor
+            return xs * self.vae_scaling_factor
+        else:
+            # Input is in range [-1, 1], scaled to [0, 1]
+            return (xs + 1) / 2
 
     # ---------------------------------------------------------------------
     # Checkpoint Utils

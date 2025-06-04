@@ -1,5 +1,5 @@
 is_compute_node_offline: False  # many slurm systems only allows internet on login node, not compute node
-waiting_for_job: True  # if True, the job will wait for the previous job to finish before starting
+waiting_for_job: False  # if True, the job will wait for the previous job to finish before starting
 
 params:
   env_name: template  # change this to the name of your conda environment

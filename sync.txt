@@ -31,3 +31,27 @@ python -m main +name=dmlab_4_to_16 dataset=dmlab algorithm=dfot_video experiment
 
 
 python -m main +name=single_image_to_short dataset=cond_ucf_101 algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/cond_ucf_101/dfot_video/2025-05-14/22-09-27/checkpoints/last.ckpt experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional
+
+
+python -m main +name=ucf_101_0_to_16 dataset=cond_ucf_101 algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" load=/scratch/s224075134/temporal_diffusion/diffusion-forcing-transformer/outputs/video_generation/training/cond_ucf_101/dfot_video/2025-05-14/22-09-27/checkpoints/last.ckpt experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256
+
+
+python -m main +name=single_image_to_short dataset=cond_ucf_101_scaling algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/cond_ucf_101_scaling/dfot_video/2025-05-16/17-30-31/checkpoints/last.ckpt experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional
+
+
+python -m main +name=difference_reference_dfot_cond_ucf_101_4_to_16 dataset=cond_ucf_101 algorithm=reference_dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" load=/scratch/s224075134/temporal_diffusion/diffusion-forcing-transformer/outputs/video_generation/training/cond_ucf_101/reference_dfot_video/2025-05-21/18-48-58/checkpoints/last.ckpt experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=0 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional algorithm.reference.predict_difference=True experiment.validation.limit_batch=256
+
+
+# Preprocess to latent
+## DMLab
+python -m main +name=Preprocessing_DMLAB dataset=dmlab algorithm=kl_autoencoder_preprocessor experiment=video_latent_preprocessing wandb.mode=disabled
+## UCF101
+python -m main +name=Preprocessing_UCF101 dataset=ucf_101 algorithm=kl_autoencoder_preprocessor experiment=video_latent_preprocessing wandb.mode=disabled
+
+# Training
+
+## Pixel
+
+## Latent
+### DMLab
+python -m main '+name=latent_16f_dfot_dmlab' 'dataset=dmlab' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=16 experiment.validation.batch_size=16

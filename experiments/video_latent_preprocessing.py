@@ -4,7 +4,7 @@ from datasets.video import (
     DMLabSimpleVideoDataset,
     BAIRSimpleVideoDataset
 )
-from algorithms.vae import ImageVAEPreprocessor, DCAEPreprocessor
+from algorithms.vae import ImageVAEPreprocessor, DCAEPreprocessor, AutoencoderKL, AutoencoderKLPreprocessor
 from .base_exp import BaseLightningExperiment
 from .data_modules import ValDataModule
 
@@ -17,6 +17,7 @@ class VideoLatentPreprocessingExperiment(BaseLightningExperiment):
     compatible_algorithms = dict(
         image_vae_preprocessor=ImageVAEPreprocessor,
         dc_ae_preprocessor=DCAEPreprocessor,
+        kl_autoencoder_preprocessor=AutoencoderKLPreprocessor
     )
 
     compatible_datasets = dict(

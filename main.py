@@ -105,6 +105,13 @@ def run_local(cfg: DictConfig):
         if hasattr(cfg.algorithm, "backbone") and hasattr(cfg.algorithm.backbone, "name"):
             tags.append(cfg.algorithm.backbone.name)
         
+        if cfg.dataset.latent.enabled:
+            tags.append("latent:enabled")
+            tags.append(f"latent_suffix:{cfg.dataset.latent.suffix}")
+        else:
+            tags.append("latent:disabled")
+        tags.append(f"resolution:{cfg.dataset.resolution}")
+        
         logger = logger_cls(
             name=name,
             save_dir=str(output_dir),

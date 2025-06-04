@@ -8,14 +8,12 @@ external_cond_type: action
 external_cond_dim: 3
 external_cond_stack: true
 external_cond_processing: mask_first
-
 resolution: 64
-data_mean: [0]
-data_std: [3.46140533056]
+
 latent:
   enabled: True
-  suffix: 17035ae5
-  num_channels: 32
+  suffix: kl_autoencoder_a1d993488 # 17035ae5
+  num_channels: 4
   downsampling_factor: [1, 8] 
   type: pre_17035ae5
 subdataset_size: null

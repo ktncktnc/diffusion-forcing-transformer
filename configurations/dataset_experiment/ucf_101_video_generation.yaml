@@ -7,7 +7,7 @@
 
 defaults:
   - ../algorithm/backbone@algorithm.backbone: dit3d
-  - ../algorithm@algorithm.vae: dc_ae_preprocessor
+  - ../algorithm@algorithm.vae: kl_autoencoder_preprocessor
 
 dataset:
   # num_eval_videos: 1000
@@ -33,12 +33,12 @@ algorithm:
   diffusion_clip_frames: 16
   contrastive_loss_weight: 0.3
   vae:
-    pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_UCF101_Res64-9da18dcf.pth
+    # pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_UCF101_Res64-9da18dcf.pth
     batch_size: 16
 
 experiment:
   ema:
-    enabled: True
+    enable: True
     decay: 0.999
   training:
     max_steps: 400000
@@ -56,7 +56,7 @@ experiment:
       monitor: "prediction/fvd"
   validation:
     batch_size: 32
-    val_every_n_step: 25000
+    val_every_n_step: 2500000
     val_every_n_epoch: null
     data:
       num_workers: 1
