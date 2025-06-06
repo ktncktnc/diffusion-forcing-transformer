@@ -9,7 +9,8 @@ from utils.logging_utils import log_video
 from utils.torch_utils import freeze_model
 from algorithms.vae.common.distribution import DiagonalGaussianDistribution
 from .kl_f8_autoencoder import AutoencoderKL
-
+import os
+from PIL import Image
 
 class AutoencoderKLPreprocessor(BasePytorchAlgo):
     """
@@ -36,19 +37,33 @@ class AutoencoderKLPreprocessor(BasePytorchAlgo):
 
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
         raise NotImplementedError(
-            "Training not implemented for VAEVideo. Only used for validation"
+            "Training not implemented for AutoencoderKL. Only used for validation"
         )
 
     def test_step(self, batch, batch_idx) -> STEP_OUTPUT:
         raise NotImplementedError(
-            "Testing not implemented for VAEVideo. Only used for validation"
+            "Testing not implemented for AutoencoderKL. Only used for validation"
         )
     
     def validation_step(self, batch, batch_idx, dataloader_idx=0) -> STEP_OUTPUT:
         videos = batch["videos"]
+        video_paths = batch["video_paths"]
         latent_paths = batch["latent_paths"]
         video_lengths = batch["video_lengths"]
         latent_paths = [Path(path) for path in latent_paths]
+
+        first_frames = videos[:, 0]
+        # save the first frame to disk
+        for i, (frame, path) in enumerate(zip(first_frames, video_paths)):
+            frame = rearrange(frame, "c h w -> h w c")
+            frame = (frame.detach().cpu().numpy()* 255).astype("uint8")
+            frame = Image.fromarray(frame)
+            path = os.path.join('/scratch/s224075134/diffusion/latent-diffusion/sample_images/ucf101', os.path.basename(path)[:-4] + '.png')
+            print(path)
+            frame.save(path)
+        
+        return None
+    
         all_done = True
         for latent_path in latent_paths:
             if not latent_path.exists():
@@ -63,10 +78,8 @@ class AutoencoderKLPreprocessor(BasePytorchAlgo):
         videos = self._rearrange_and_normalize(videos)
 
         # Encode the video data into a latent space
-        # always convert to float16 (as they will be saved as float16 tensors)
         latent_dist = self._encode_videos(videos)
-        # latents = latent_dist.sample().to(torch.float16)
-        latents = latent_dist.sample()
+        latents = latent_dist.mode()
 
         # just to see the progress in wandb
         if batch_idx % 100 == 0:
@@ -74,14 +87,12 @@ class AutoencoderKLPreprocessor(BasePytorchAlgo):
 
         # log gt vs reconstructed video to wandb
         if batch_idx % self.log_every_n_batch == 0 and self.logger:
-            videos = videos.detach().cpu()[: self.max_decode_length]
-
-            reconstructed_videos = self.vae.decode(latents[: self.max_decode_length], return_dict=False)[0]
+            videos = videos.detach().cpu()
+            reconstructed_videos = self._decode_videos(latents)
             reconstructed_videos = reconstructed_videos.detach().cpu()
             videos = self._rearrange_and_unnormalize(videos, batch_size)
-            reconstructed_videos = self._rearrange_and_unnormalize(
-                reconstructed_videos, batch_size
-            )
+            reconstructed_videos = self._rearrange_and_unnormalize(reconstructed_videos, batch_size)
+
             log_video(
                 reconstructed_videos,
                 videos,
@@ -120,6 +131,16 @@ class AutoencoderKLPreprocessor(BasePytorchAlgo):
         for chunk in chunks:
             latent_dist_list.append(self.vae.encode(chunk, return_dict=False)[0])
         return DiagonalGaussianDistribution.cat(latent_dist_list)
+    
+    def _decode_videos(self, latents: torch.Tensor) -> torch.Tensor:
+        chunks = latents.chunk(
+            (len(latents) + self.max_decode_length - 1) // self.max_decode_length, dim=0
+        )
+        decoded_videos = []
+        for chunk in chunks:
+            decoded_videos.append(self.vae.decode(chunk, return_dict=False)[0])
+        return torch.cat(decoded_videos, dim=0)
+    
 
     def _rearrange_and_normalize(self, videos: torch.Tensor) -> torch.Tensor:
         videos = rearrange(videos, "b f c h w -> (b f) c h w")

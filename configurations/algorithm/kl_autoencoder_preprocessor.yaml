@@ -6,5 +6,5 @@ pretrained_model_name_or_path: stabilityai/sd-vae-ft-mse
 pretrained_kwargs: {}
 max_encode_length: 700 # number of frames that can be passed through the encoder at once
 logging:
-  max_video_length: 300
-  every_n_batch: 5000
+  max_video_length: 700
+  every_n_batch: 100

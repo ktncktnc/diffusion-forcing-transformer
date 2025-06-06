@@ -4,6 +4,7 @@ from omegaconf import DictConfig
 import torch
 import lightning.pytorch as pl
 from lightning.pytorch.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
+from datasets.video.base_video import BaseAdvancedVideoDataset
 
 
 class BaseDataModule(pl.LightningDataModule):
@@ -32,6 +33,9 @@ class BaseDataModule(pl.LightningDataModule):
     def _dataloader(self, split: str) -> TRAIN_DATALOADERS | EVAL_DATALOADERS:
         dataset = self._build_dataset(split)
         print(f"Dataset {split} has {len(dataset)} samples")
+        #TODO: check if dataset is an advanced video dataset, extend for other types of datasets
+        is_advanced_video_dataset = isinstance(dataset, BaseAdvancedVideoDataset)
+
         split_cfg = self.exp_cfg[split]
 
         def pad_tensor(vec, pad, dim):
@@ -78,18 +82,19 @@ class BaseDataModule(pl.LightningDataModule):
 
             return torch.utils.data.dataloader.default_collate(batch)
         
+        collate_fn = None if is_advanced_video_dataset else collate_fn
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=split_cfg.batch_size,
-            num_workers=self._get_num_workers(split_cfg.data.num_workers),
+            # num_workers=self._get_num_workers(split_cfg.data.num_workers),
             shuffle=self._get_shuffle(dataset, split_cfg.data.shuffle),
-            persistent_workers=split == "training",
+            # persistent_workers=split == "training",
             worker_init_fn=lambda worker_id: (
                 dataset.worker_init_fn(worker_id)
                 if hasattr(dataset, "worker_init_fn")
                 else None
             ),
-            # collate_fn=collate_fn
+            collate_fn=collate_fn
         )
 
 

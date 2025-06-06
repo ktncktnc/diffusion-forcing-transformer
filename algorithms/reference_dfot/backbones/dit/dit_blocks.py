@@ -263,6 +263,7 @@ class DiTBlock(nn.Module):
         hidden_size: int,
         num_heads: int,
         mlp_ratio: Optional[float] = 4.0,
+        is_concat: bool = True,
         rope: Optional[RotaryEmbeddingND] = None,
         **block_kwargs: dict,
     ):
@@ -279,21 +280,26 @@ class DiTBlock(nn.Module):
         self.attn = Attention(
             hidden_size, num_heads=num_heads, qkv_bias=True, rope=rope, **block_kwargs
         )
+        self.is_concat = is_concat
         self.use_mlp = mlp_ratio is not None
         if self.use_mlp:
             self.norm2 = AdaLayerNormZero(hidden_size)
             self.mlp = Mlp(
-                in_features=hidden_size*2, # one for x_t, one for reference
+                in_features=hidden_size,
                 out_features=hidden_size,
                 hidden_features=int(hidden_size * mlp_ratio),
                 act_layer=partial(nn.GELU, approximate="tanh"),
             )
 
-        # Resnet blovk for reference
-        self.resnet_block = ResNetBlock(
-            hidden_size=hidden_size,
-            mlp_ratio=mlp_ratio
-        )
+        # self.seperate_resnet = seperate_resnet
+        # if seperate_resnet:
+            # Resnet blovk for reference
+        # self.resnet_block = ResNetBlock(
+        #     hidden_size=hidden_size,
+        #     mlp_ratio=mlp_ratio
+        # )
+        self.linear_encoder = nn.Linear(hidden_size, hidden_size, bias=True)
+
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -327,15 +333,22 @@ class DiTBlock(nn.Module):
             reference: Reference tensor of shape (B, n_token_per_frame, C).
             N = n_token_per_frame * n_frames
         """
+        reference = self.linear_encoder(reference)
         n_frames = t.shape[-1]
+        x = x + repeat(reference, 'b n c -> b (n n_frame) c', n_frame=n_frames)
+        # x = torch.cat([x, repeat(reference, 'b n c -> b (n n_frame) c', n_frame=n_frames)], dim=-1)
         x, gate_msa = self.norm1(x, c)
         x = x + gate_msa * self.attn(x, t, height, width)
+
         if self.use_mlp:
             x, gate_mlp = self.norm2(x, c)
-            x = x + gate_mlp * self.mlp(torch.cat([x, repeat(reference, 'b n c -> b (n n_frame) c', n_frame=n_frames)], dim=-1))
-        reference = self.resnet_block(reference)
-        return x, reference
+            x = x + gate_mlp * self.mlp(x)
+        
+        # if self.seperate_resnet:
+        #     reference = self.resnet_block(reference)
+        #     return x, reference
 
+        return x
 
 class DITFinalLayer(nn.Module):
     """

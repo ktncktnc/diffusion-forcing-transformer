@@ -1,0 +1,6 @@
+defaults:
+  - dit3d
+
+name: resnet_dit3d
+resnet_num_blocks: 8
+is_concat: True

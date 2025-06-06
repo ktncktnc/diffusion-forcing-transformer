@@ -27,9 +27,10 @@ augmentation:
 
 latent:
   enabled: True
-  num_channels: 4
+  num_channels: 32
   downsampling_factor: [1, 8] # [temporal, spatial]
-  suffix: kl_autoencoder_a1d993488 # 9da18dcf
+  # suffix: kl_autoencoder_a1d993488 # 9da18dcf
+  suffix: 9da18dcf # 9da18dcf
   type: pre_9da18dcf
   # type: online # online, pre_+suffix
 

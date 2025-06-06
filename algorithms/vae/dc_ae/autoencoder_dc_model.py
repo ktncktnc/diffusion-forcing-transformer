@@ -516,33 +516,33 @@ class MyAutoencoderDC(ModelMixin, ConfigMixin):
         cfg: DictConfig
     ) -> None:
         super().__init__()
-        self.cfg = cfg
+        self.scaling_factor = cfg.scaling_factor
 
         self.encoder = Encoder(
-            in_channels=self.cfg.in_channels,
-            latent_channels=self.cfg.latent_channels,
-            attention_head_dim=self.cfg.attention_head_dim,
-            block_type=self.cfg.encoder_block_types,
-            block_out_channels=self.cfg.encoder_block_out_channels,
-            layers_per_block=self.cfg.encoder_layers_per_block,
-            qkv_multiscales=self.cfg.encoder_qkv_multiscales,
-            downsample_block_type=self.cfg.downsample_block_type,
+            in_channels=cfg.in_channels,
+            latent_channels=cfg.latent_channels,
+            attention_head_dim=cfg.attention_head_dim,
+            block_type=cfg.encoder_block_types,
+            block_out_channels=cfg.encoder_block_out_channels,
+            layers_per_block=cfg.encoder_layers_per_block,
+            qkv_multiscales=cfg.encoder_qkv_multiscales,
+            downsample_block_type=cfg.downsample_block_type,
         )
 
         self.decoder = Decoder(
-            in_channels=self.cfg.in_channels,
-            latent_channels=self.cfg.latent_channels,
-            attention_head_dim=self.cfg.attention_head_dim,
-            block_type=self.cfg.decoder_block_types,
-            block_out_channels=self.cfg.decoder_block_out_channels,
-            layers_per_block=self.cfg.decoder_layers_per_block,
-            qkv_multiscales=self.cfg.decoder_qkv_multiscales,
-            norm_type=self.cfg.decoder_norm_types,
-            act_fn=self.cfg.decoder_act_fns,
-            upsample_block_type=self.cfg.upsample_block_type,
+            in_channels=cfg.in_channels,
+            latent_channels=cfg.latent_channels,
+            attention_head_dim=cfg.attention_head_dim,
+            block_type=cfg.decoder_block_types,
+            block_out_channels=cfg.decoder_block_out_channels,
+            layers_per_block=cfg.decoder_layers_per_block,
+            qkv_multiscales=cfg.decoder_qkv_multiscales,
+            norm_type=cfg.decoder_norm_types,
+            act_fn=cfg.decoder_act_fns,
+            upsample_block_type=cfg.upsample_block_type,
         )
 
-        self.spatial_compression_ratio = 2**(len(self.cfg.encoder_block_out_channels) - 1)
+        self.spatial_compression_ratio = 2**(len(cfg.encoder_block_out_channels) - 1)
         self.temporal_compression_ratio = 1
 
         # When decoding a batch of video latents at a time, one can save memory by slicing across the batch dimension

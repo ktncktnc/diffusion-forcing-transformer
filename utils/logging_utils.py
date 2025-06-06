@@ -122,7 +122,7 @@ def log_video(
         caption = captions[i] if i < len(captions) else None
         logger.log(
             {
-                name: wandb.Video(video[i], fps=24, caption=caption),
+                name: wandb.Video(video[i], fps=6, caption=caption),
                 "trainer/global_step": step,
             }
         )

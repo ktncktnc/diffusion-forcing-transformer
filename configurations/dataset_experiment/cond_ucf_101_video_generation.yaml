@@ -7,7 +7,7 @@
 
 defaults:
   - ../algorithm/backbone@algorithm.backbone: dit3d
-  - ../algorithm@algorithm.vae: dc_ae_preprocessor
+  - ../algorithm@algorithm.vae: dc_ae_preprocessor # kl_autoencoder_preprocessor
 
 dataset:
   # num_eval_videos: 1000
@@ -49,7 +49,7 @@ experiment:
       num_workers: 11
       shuffle: True
     checkpointing:
-      every_n_train_steps: 30001
+      every_n_train_steps: 25001
       every_n_epochs: null
       save_last: True
       save_top_k: 5

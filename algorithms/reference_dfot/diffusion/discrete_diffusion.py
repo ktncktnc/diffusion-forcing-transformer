@@ -8,6 +8,7 @@ from einops import rearrange, reduce
 from ..backbones import (
     Unet3D,
     DiT3D,
+    Resnet_DiT3D,
     DiT3DPose,
     UViT3D,
     UViT3DPose,
@@ -70,6 +71,8 @@ class DiscreteDiffusion(nn.Module):
                 model_cls = DiT3D
             case "dit3d_pose":
                 model_cls = DiT3DPose
+            case "resnet_dit3d":
+                model_cls = Resnet_DiT3D
             case _:
                 raise ValueError(f"unknown model type {self.backbone_cfg.name}")
         self.model = model_cls(

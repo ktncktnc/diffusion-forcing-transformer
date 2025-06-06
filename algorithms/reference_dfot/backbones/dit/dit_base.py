@@ -48,6 +48,7 @@ class DiTBase(nn.Module):
         mlp_ratio: float = 4.0,
         learn_sigma: bool = True,
         use_gradient_checkpointing: bool = False,
+        **block_kwargs: dict,
     ):
         """
         Args:
@@ -139,6 +140,7 @@ class DiTBase(nn.Module):
                         hidden_size=hidden_size,
                         num_heads=num_heads,
                         mlp_ratio=mlp_ratio,
+                        **block_kwargs,
                     )
                     for _ in range(depth)
                 ]
@@ -147,9 +149,6 @@ class DiTBase(nn.Module):
             else None
         )
 
-        # TODO: should we add reference in final layer?
-        # TODO: should we add reference in final layer?
-        # TODO: should we add reference in final layer?
         self.final_layer = DITFinalLayer(hidden_size, self.out_channels)
 
     @property

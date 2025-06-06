@@ -6,13 +6,13 @@
 # useful for dataset-specific overrides
 
 dataset:
-  resolution: 64
+  resolution: 256
   latent:
-    # suffix: 9da18dcf
-    suffix: kl_autoencoder_a1d993488
+    suffix: 9da18dcf_temp
+    # suffix: kl_autoencoder_a1d993488_temp
 
-# algorithm:
-  # pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_UCF101_Res64-9da18dcf.pth
+algorithm:
+  pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_UCF101_Res64-9da18dcf.pth
 
 experiment:
   batch_size: 15

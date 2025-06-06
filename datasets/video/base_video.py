@@ -285,8 +285,9 @@ class BaseSimpleVideoDataset(BaseVideoDataset):
         video = self.transform(video)
         sample = {
             'videos': video,
-            'latent_paths': self.video_metadata_to_latent_path(video_metadata).as_posix(),
             'video_lengths': self.video_length(video_metadata),
+            'video_paths': video_metadata['video_paths'].as_posix(),
+            'latent_paths': self.video_metadata_to_latent_path(video_metadata).as_posix(),
         }
         return sample
 
@@ -484,7 +485,11 @@ class BaseAdvancedVideoDataset(BaseVideoDataset):
         self, video_metadata: Dict[str, Any], start_frame: int, end_frame: int
     ) -> torch.Tensor:
         latent_path = self.video_metadata_to_latent_path(video_metadata)
-        return torch.load(latent_path, weights_only=False)[start_frame:end_frame]
+        try:
+            return torch.load(latent_path, weights_only=False)[start_frame:end_frame]
+        except Exception as e:
+            print('latent_path', latent_path)
+            raise e
 
     @abstractmethod
     def load_cond(
