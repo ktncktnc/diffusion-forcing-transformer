@@ -292,7 +292,6 @@ class UCF101AdvancedVideoDataset(
         self.setup()
 
     def __len__(self) -> int:
-        print('BaseAdvancedVideoDataset.__len__(self)', BaseAdvancedVideoDataset.__len__(self))
         return BaseAdvancedVideoDataset.__len__(self)
 
     def setup(self) -> None:

@@ -7,11 +7,12 @@
 
 defaults:
   - ../algorithm/backbone@algorithm.backbone: dit3d
-  - ../algorithm@algorithm.vae: dc_ae_preprocessor # kl_autoencoder_preprocessor
+  - ../algorithm@algorithm.vae: dc_ae_preprocessor # dc_ae_preprocessor # kl_autoencoder_preprocessor
 
 dataset:
   # num_eval_videos: 1000
   subdataset_size: null
+  resolution: 64
   latent:
     enabled: True
 
@@ -58,9 +59,10 @@ experiment:
     batch_size: 32
     val_every_n_step: 25000
     val_every_n_epoch: null
+    validate_training_set: False
     data:
       num_workers: 1
-    limit_batch: 50
+    limit_batch: 4
   test:
     batch_size: 32
     data:

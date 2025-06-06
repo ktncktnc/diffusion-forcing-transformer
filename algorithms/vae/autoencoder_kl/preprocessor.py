@@ -51,18 +51,6 @@ class AutoencoderKLPreprocessor(BasePytorchAlgo):
         latent_paths = batch["latent_paths"]
         video_lengths = batch["video_lengths"]
         latent_paths = [Path(path) for path in latent_paths]
-
-        first_frames = videos[:, 0]
-        # save the first frame to disk
-        for i, (frame, path) in enumerate(zip(first_frames, video_paths)):
-            frame = rearrange(frame, "c h w -> h w c")
-            frame = (frame.detach().cpu().numpy()* 255).astype("uint8")
-            frame = Image.fromarray(frame)
-            path = os.path.join('/scratch/s224075134/diffusion/latent-diffusion/sample_images/ucf101', os.path.basename(path)[:-4] + '.png')
-            print(path)
-            frame.save(path)
-        
-        return None
     
         all_done = True
         for latent_path in latent_paths:

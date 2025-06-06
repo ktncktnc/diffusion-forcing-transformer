@@ -49,7 +49,11 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
     def on_after_batch_transfer(
         self, batch: Dict, dataloader_idx: int
     ) -> Tuple[Tensor, Optional[Tensor], Tensor, Optional[Tensor]]:
-        xs, conditions, masks, gt_videos = super().on_after_batch_transfer(batch, dataloader_idx)
+        batch = super().on_after_batch_transfer(batch, dataloader_idx)
+        xs = batch["xs"]
+        conditions = batch.get("conditions")
+        reference = batch.get("reference")
+        gt_videos = batch.get("gt_videos")
 
         if self.external_cond_type == "label":
             conditions = conditions
@@ -60,7 +64,14 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
         xs = xs[:, 1:, ...]
         gt_videos = gt_videos[:, 1:, ...] if gt_videos is not None else None
         masks = torch.ones(*xs.shape[:2]).bool().to(self.device)
-        return xs, conditions, reference, masks, gt_videos
+
+        return {
+            "xs": xs,
+            "conditions": conditions,
+            "reference": reference,
+            "masks": masks,
+            "gt_videos": gt_videos,
+        }
 
     # ---------------------------------------------------------------------
     # Training
@@ -70,7 +81,10 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
         Training step
         Use first frame or context_frames as reference.
         """
-        xs, conditions, reference, masks, *_ = batch
+        xs = batch["xs"]
+        conditions = batch.get("conditions")
+        reference = batch["reference"]
+        masks = batch["masks"]
 
         if self.cfg.reference.predict_difference:
             xs = xs - repeat(reference.unsqueeze(1), 'b n ... -> b (n n_frame) ...', n_frame=xs.shape[1])
@@ -108,74 +122,17 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
         return output_dict
 
     # ---------------------------------------------------------------------
-    # Denoising Evaluation
-    # ---------------------------------------------------------------------
-    def _eval_denoising(self, batch, batch_idx, namespace="training") -> None:
-        """Evaluate the denoising performance during training."""
-        xs, conditions, reference, masks, gt_videos = batch
-
-        xs = xs[:, : self.max_tokens]
-        if conditions is not None:
-            match self.external_cond_type:
-                case "label":
-                    conditions = conditions
-                case "action":
-                    conditions = conditions[:, : self.max_tokens]
-                case _:
-                    raise ValueError(
-                        f"Unknown external condition type: {self.external_cond_type}. "
-                        "Supported types are 'label' and 'action'."
-                    )
-                
-        masks = masks[:, : self.max_tokens]
-        if gt_videos is not None:
-            gt_videos = gt_videos[:, : self.max_frames]
-
-        batch = (xs, conditions, reference, masks, gt_videos)
-        output = self.training_step(batch, batch_idx, namespace=namespace)
-
-        gt_videos = output["xs"]
-        recons = output["xs_pred"]
-        if self.is_latent_diffusion:
-            recons = self._decode(recons)
-            gt_videos = self._decode(gt_videos)
-
-        if recons.shape[1] < gt_videos.shape[1]:  # recons.ndim is 5
-            recons = F.pad(
-                recons,
-                (0, 0, 0, 0, 0, 0, 0, gt_videos.shape[1] - recons.shape[1], 0, 0),
-            )
-
-        gt_videos, recons = self.gather_data((gt_videos, recons))
-
-        if not (
-            is_rank_zero
-            and self.logger
-            and self.num_logged_videos < self.logging.max_num_videos
-        ):
-            return
-
-        num_videos_to_log = min(
-            self.logging.max_num_videos - self.num_logged_videos,
-            gt_videos.shape[0],
-        )
-        log_video(
-            recons[:num_videos_to_log],
-            gt_videos[:num_videos_to_log],
-            step=self.global_step,
-            namespace="denoising_vis",
-            logger=self.logger.experiment,
-            indent=self.num_logged_videos,
-            captions="denoised | gt",
-        )
-
-    # ---------------------------------------------------------------------
     # Sampling
     # ---------------------------------------------------------------------
     def _sample_all_videos(
         self, batch, batch_idx, namespace="validation"
     ) -> Optional[Dict[str, Tensor]]:
-        xs, conditions, reference, *_, gt_videos = batch
+        # xs, conditions, reference, *_, gt_videos = batch
+        xs = batch["xs"]
+        conditions = batch.get("conditions")
+        reference = batch["reference"]
+        gt_videos = batch["gt_videos"]
+
         all_videos: Dict[str, Tensor] = {"gt": xs}
         
         if self.cfg.reference.predict_difference:

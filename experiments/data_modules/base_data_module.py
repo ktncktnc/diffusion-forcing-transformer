@@ -32,7 +32,7 @@ class BaseDataModule(pl.LightningDataModule):
 
     def _dataloader(self, split: str) -> TRAIN_DATALOADERS | EVAL_DATALOADERS:
         dataset = self._build_dataset(split)
-        print(f"Dataset {split} has {len(dataset)} samples")
+        # print(f"Dataset {split} has {len(dataset)} samples")
         #TODO: check if dataset is an advanced video dataset, extend for other types of datasets
         is_advanced_video_dataset = isinstance(dataset, BaseAdvancedVideoDataset)
 
@@ -102,7 +102,11 @@ class BaseDataModule(pl.LightningDataModule):
         return self._dataloader("training")
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        return self._dataloader("validation")
+        val_data = self._dataloader("validation")
+        if self.root_cfg.experiment.validation.validate_training_set:
+            train_data = self._dataloader("training")
+            return [val_data, train_data]
+        return val_data
 
     def test_dataloader(self) -> EVAL_DATALOADERS:
         return self._dataloader("test")

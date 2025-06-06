@@ -61,6 +61,7 @@ experiment:
     data:
       num_workers: 1
     limit_batch: 50
+    validate_training_set: False
   test:
     batch_size: 32
     data:

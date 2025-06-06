@@ -85,7 +85,8 @@ class SanaMultiscaleLinearAttention(nn.Module):
 
     def apply_linear_attention(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
         value = F.pad(value, (0, 0, 0, 1), mode='constant', value=1)  # Adds padding
-        with torch.cuda.amp.autocast(enabled=False):
+        # with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             scores = torch.matmul(value, key.transpose(-1, -2))
             hidden_states = torch.matmul(scores, query)
 

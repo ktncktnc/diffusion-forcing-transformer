@@ -5,6 +5,7 @@ from lightning_utilities.core.apply_func import apply_to_collection
 from omegaconf import DictConfig
 import lightning.pytorch as pl
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 from torch.optim.optimizer import Optimizer
 from lightning.pytorch.utilities.types import STEP_OUTPUT
@@ -115,7 +116,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
 
         # 2. Prepare external conditions
         conditions = batch.get("conds", None)
-            
+
         # 3. Prepare the masks
         if "masks" in batch:
             assert (
@@ -123,9 +124,13 @@ class BaseVideoAlgo(BasePytorchAlgo):
             ), "Masks should not be provided from the dataset when using VideoVAE."
         else:
             masks = torch.ones(*xs.shape[:2]).bool().to(self.device)
-
-        return xs, conditions, masks, gt_videos
-
+        
+        return {
+            "xs": xs,
+            "conditions": conditions,
+            "masks": masks,
+            "gt_videos": gt_videos,
+        }
     
     # ---------------------------------------------------------------------
     # Prepare Model, Optimizer, and Metrics
@@ -188,64 +193,36 @@ class BaseVideoAlgo(BasePytorchAlgo):
                         metric_types,
                         split_batch_size=self.logging.metrics_batch_size,
                     )
-
-    # ---------------------------------------------------------------------
-    # Data Preprocessing
-    # ---------------------------------------------------------------------
-    def on_after_batch_transfer(
-        self, batch: Dict, dataloader_idx: int
-    ) -> Tuple[Tensor, Optional[Tensor], Tensor, Optional[Tensor]]:
+    
+    @staticmethod
+    def get_dataloader_str(dataloader_idx: int) -> str:
         """
-        Preprocess the batch before training/validation.
-
-        Args:
-            batch (Dict): The batch of data. Contains "videos" or "latents", (optional) "conditions", and "masks".
-            dataloader_idx (int): The index of the dataloader.
-        Returns:
-            xs (Tensor, "B n_tokens *x_shape"): Tokens to be processed by the model.
-            conditions (Optional[Tensor], "B n_tokens d"): External conditions for the tokens.
-            masks (Tensor, "B n_tokens"): Masks for the tokens.
-            gt_videos (Optional[Tensor], "B n_frames *x_shape"): Optional ground truth videos, used for validation in latent diffusion.
+        Get the string representation of the dataloader index.
         """
-        # 1. Tokenize the videos and optionally prepare the ground truth videos
-        gt_videos = None
-        if self.is_latent_diffusion:
-            if self.is_latent_online:
-                xs = self._encode(batch["videos"])
-            else:
-                xs = batch['latents']
-
-            if "videos" in batch:
-                gt_videos = batch["videos"]
-        else:
-            xs = batch["videos"]
-
-        xs = self._normalize_x(xs)
-
-        # 2. Prepare external conditions
-        conditions = batch.get("conds", None)
-
-        # 3. Prepare the masks
-        if "masks" in batch:
-            assert (
-                not self.is_latent_video_vae
-            ), "Masks should not be provided from the dataset when using VideoVAE."
-        else:
-            masks = torch.ones(*xs.shape[:2]).bool().to(self.device)
-
-        return xs, conditions, masks, gt_videos
+        return "validate_on_train" if dataloader_idx == 1 else "validation"
     
     # ---------------------------------------------------------------------
     # Validation
     # ---------------------------------------------------------------------
     @torch.no_grad()
-    def validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
-        """Validation step"""
+    def validation_step(self, batch, batch_idx, dataloader_idx=0, namespace="validation") -> STEP_OUTPUT:
+        """
+        dataloader_idx: 0 for training, 1 for validation
+        """
         # 1. If running validation while training a model, directly evaluate
         # the denoising performance to detect overfitting, etc.
         # Logs the "denoising_vis" visualization as well as "validation/loss" metric.
         # if self.trainer.state.fn == "FIT":
-        self._eval_denoising(batch, batch_idx, namespace=namespace)
+
+        # NOTE: after 1 dataloader done, will call `on_validation_dataloader_end` to calculate metrics
+        # The last dataloader will be processed in `on_validation_epoch_end`
+        if dataloader_idx != self.validation_dataloader_idx:
+            if self.validation_dataloader_idx >= 0:
+                self.on_validation_dataloader_end()
+            self.validation_dataloader_idx = dataloader_idx
+
+        dataloader_str = self.get_dataloader_str(dataloader_idx)
+        self._eval_denoising(batch, batch_idx, namespace=dataloader_str)
 
         # 2. Sample all videos (based on the specified tasks)
         # and log the generated videos and metrics.
@@ -254,11 +231,79 @@ class BaseVideoAlgo(BasePytorchAlgo):
         ):
             all_videos = self._sample_all_videos(batch, batch_idx, namespace)
             self._update_metrics(all_videos)
-            self._log_videos(all_videos, namespace)
+            self._log_videos(all_videos, dataloader_str)
         
         if self.cfg.save_attn_map.enabled:
             # TODO: unconditional 
             save_attention_maps(attn_maps, self.cfg.save_attn_map.attn_map_dir, False, batch_idx)
+
+    def _eval_denoising(self, batch, batch_idx, namespace="training") -> None:
+        """Evaluate the denoising performance during training."""
+        # xs, conditions, masks, gt_videos = batch
+        xs = batch["xs"]
+        conditions = batch.get("conditions")
+        masks = torch.ones(*xs.shape[:2]).bool().to(self.device)
+        gt_videos = batch.get("gt_videos")
+
+        xs = xs[:, : self.max_tokens]
+        if conditions is not None:
+            match self.external_cond_type:
+                case "label":
+                    conditions = conditions
+                case "action":
+                    conditions = conditions[:, : self.max_tokens]
+                case _:
+                    raise ValueError(
+                        f"Unknown external condition type: {self.external_cond_type}. "
+                        "Supported types are 'label' and 'action'."
+                    )
+                
+        masks = masks[:, : self.max_tokens]
+        if gt_videos is not None:
+            gt_videos = gt_videos[:, : self.max_frames]
+
+        batch['xs'] = xs
+        batch['conditions'] = conditions
+        batch['masks'] = masks
+        batch['gt_videos'] = gt_videos
+
+        # batch = (xs, conditions, masks, gt_videos)
+        output = self.training_step(batch, batch_idx, namespace=namespace)
+
+        gt_videos = output["xs"]
+        recons = output["xs_pred"]
+        if self.is_latent_diffusion:
+            recons = self._decode(recons)
+            gt_videos = self._decode(gt_videos)
+
+        if recons.shape[1] < gt_videos.shape[1]:  # recons.ndim is 5
+            recons = F.pad(
+                recons,
+                (0, 0, 0, 0, 0, 0, 0, gt_videos.shape[1] - recons.shape[1], 0, 0),
+            )
+
+        gt_videos, recons = self.gather_data((gt_videos, recons))
+
+        if not (
+            is_rank_zero
+            and self.logger
+            and self.num_logged_videos < self.logging.max_num_videos
+        ):
+            return
+
+        num_videos_to_log = min(
+            self.logging.max_num_videos - self.num_logged_videos,
+            gt_videos.shape[0],
+        )
+        log_video(
+            recons[:num_videos_to_log],
+            gt_videos[:num_videos_to_log],
+            step=self.global_step,
+            namespace=f"{namespace}_denoising_vis",
+            logger=self.logger.experiment,
+            indent=self.num_logged_videos,
+            captions="denoised | gt",
+        )
 
     def on_validation_epoch_start(self) -> None:
         if self.cfg.logging.deterministic is not None:
@@ -272,26 +317,46 @@ class BaseVideoAlgo(BasePytorchAlgo):
         if self.cfg.save_attn_map.enabled:
             register_hooks(self.diffusion_model.model, True)
 
+        self.validation_dataloader_idx = -1
+
+    def on_validation_dataloader_end(self) -> None:
+        """
+        Called at the end of the validation dataloader.
+        This is used to reset the generator and vae for the next epoch.
+        """
+        namespace = self.get_dataloader_str(self.validation_dataloader_idx)
+        print('Done with validation dataloader:', namespace)
+        if self.trainer.sanity_checking and not self.cfg.logging.sanity_generation:
+            return
+
+        for task in self.tasks:
+            metrics = self._metrics(task).log(task)
+            metrics = {f"{namespace}_{k}": v for k, v in metrics.items()}
+            self.log_dict(
+                metrics,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+                add_dataloader_idx=False
+            )
+        
+        self.validation_dataloader_idx = None
+
     def on_validation_epoch_end(self, namespace="validation") -> None:
+        """
+        dataloader_idx: 0 for training, 1 for validation
+        """
+        self.on_validation_dataloader_end()
+
         self.generator = None
         if self.is_latent_diffusion and not self.is_latent_online:
             self.vae = None
         self.num_logged_videos = 0
 
-        if self.trainer.sanity_checking and not self.cfg.logging.sanity_generation:
-            return
-
-        for task in self.tasks:
-            self.log_dict(
-                self._metrics(task).log(task),
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                sync_dist=True,
-            )
-        
         if self.cfg.save_attn_map:
             clear_hooks(self.diffusion_model.model)
+        
 
     # ---------------------------------------------------------------------
     # Test step
@@ -573,7 +638,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
                 cut_videos(all_videos[task]),
                 cut_videos(all_videos["gt"]),
                 step=None if namespace == "test" else self.global_step,
-                namespace=f"{task}_vis",
+                namespace=f"{namespace}_{task}_vis",
                 logger=self.logger.experiment,
                 indent=self.num_logged_videos,
                 raw_dir=self.logging.raw_dir,

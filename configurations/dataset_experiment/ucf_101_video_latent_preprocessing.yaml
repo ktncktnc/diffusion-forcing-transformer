@@ -8,11 +8,11 @@
 dataset:
   resolution: 256
   latent:
-    suffix: 9da18dcf_temp
+    suffix: kl_autoencoder_a1d993488 # 9da18dcf_temp
     # suffix: kl_autoencoder_a1d993488_temp
 
 algorithm:
   pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_UCF101_Res64-9da18dcf.pth
 
 experiment:
-  batch_size: 15
+  batch_size: 8

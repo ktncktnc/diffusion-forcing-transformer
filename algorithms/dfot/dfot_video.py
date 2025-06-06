@@ -40,7 +40,9 @@ class DFoTVideo(BaseVideoAlgo):
     # ---------------------------------------------------------------------
     def training_step(self, batch, batch_idx, namespace="training") -> STEP_OUTPUT:
         """Training step"""
-        xs, conditions, masks, *_ = batch
+        xs = batch["xs"]
+        conditions = batch.get("conditions")
+        masks = batch["masks"]
 
         noise_levels, masks = self._get_training_noise_levels(xs, masks)
         xs_pred, loss = self.diffusion_model(
@@ -57,6 +59,7 @@ class DFoTVideo(BaseVideoAlgo):
                 on_step=namespace == "training",
                 on_epoch=namespace != "training",
                 sync_dist=True,
+                add_dataloader_idx=False
             )
 
         xs, xs_pred = map(self._unnormalize_x, (xs, xs_pred))
@@ -68,72 +71,17 @@ class DFoTVideo(BaseVideoAlgo):
         }
         return output_dict
 
-    def _eval_denoising(self, batch, batch_idx, namespace="training") -> None:
-        """Evaluate the denoising performance during training."""
-        xs, conditions, masks, gt_videos = batch
-
-        xs = xs[:, : self.max_tokens]
-        if conditions is not None:
-            match self.external_cond_type:
-                case "label":
-                    conditions = conditions
-                case "action":
-                    conditions = conditions[:, : self.max_tokens]
-                case _:
-                    raise ValueError(
-                        f"Unknown external condition type: {self.external_cond_type}. "
-                        "Supported types are 'label' and 'action'."
-                    )
-                
-        masks = masks[:, : self.max_tokens]
-        if gt_videos is not None:
-            gt_videos = gt_videos[:, : self.max_frames]
-
-        batch = (xs, conditions, masks, gt_videos)
-        output = self.training_step(batch, batch_idx, namespace=namespace)
-
-        gt_videos = output["xs"]
-        recons = output["xs_pred"]
-        if self.is_latent_diffusion:
-            recons = self._decode(recons)
-            gt_videos = self._decode(gt_videos)
-
-        if recons.shape[1] < gt_videos.shape[1]:  # recons.ndim is 5
-            recons = F.pad(
-                recons,
-                (0, 0, 0, 0, 0, 0, 0, gt_videos.shape[1] - recons.shape[1], 0, 0),
-            )
-
-        gt_videos, recons = self.gather_data((gt_videos, recons))
-
-        if not (
-            is_rank_zero
-            and self.logger
-            and self.num_logged_videos < self.logging.max_num_videos
-        ):
-            return
-
-        num_videos_to_log = min(
-            self.logging.max_num_videos - self.num_logged_videos,
-            gt_videos.shape[0],
-        )
-        log_video(
-            recons[:num_videos_to_log],
-            gt_videos[:num_videos_to_log],
-            step=self.global_step,
-            namespace="denoising_vis",
-            logger=self.logger.experiment,
-            indent=self.num_logged_videos,
-            captions="denoised | gt",
-        )
-
     # ---------------------------------------------------------------------
     # Sampling
     # ---------------------------------------------------------------------
     def _sample_all_videos(
         self, batch, batch_idx, namespace="validation"
     ) -> Optional[Dict[str, Tensor]]:
-        xs, conditions, *_, gt_videos = batch
+        # xs, conditions, *_, gt_videos = batch
+        xs = batch["xs"]
+        conditions = batch.get("conditions")
+        gt_videos = batch["gt_videos"]
+
         all_videos: Dict[str, Tensor] = {"gt": xs}
 
         for task in self.tasks:
