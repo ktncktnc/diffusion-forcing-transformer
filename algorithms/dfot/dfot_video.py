@@ -75,13 +75,14 @@ class DFoTVideo(BaseVideoAlgo):
     # Sampling
     # ---------------------------------------------------------------------
     def _sample_all_videos(
-        self, batch, batch_idx, namespace="validation"
+        self, batch, batch_idx, namespace="validation", n_context_tokens=None
     ) -> Optional[Dict[str, Tensor]]:
         # xs, conditions, *_, gt_videos = batch
         xs = batch["xs"]
         conditions = batch.get("conditions")
         gt_videos = batch["gt_videos"]
 
+        n_context_tokens = n_context_tokens if n_context_tokens is not None else self.n_context_tokens
         all_videos: Dict[str, Tensor] = {"gt": xs}
 
         for task in self.tasks:
@@ -90,7 +91,7 @@ class DFoTVideo(BaseVideoAlgo):
                 if task == "prediction"
                 else self._interpolate_videos
             )
-            all_videos[task] = sample_fn(xs, conditions=conditions)
+            all_videos[task] = sample_fn(xs, conditions=conditions, n_context_tokens=n_context_tokens)
 
         # remove None values
         all_videos = {k: v for k, v in all_videos.items() if v is not None}
@@ -105,16 +106,10 @@ class DFoTVideo(BaseVideoAlgo):
                 k: self._decode(v) if k != "gt" else gt_videos
                 for k, v in all_videos.items()
             }
-
-        # # replace the context frames of video predictions with the ground truth
-        # if "prediction" in all_videos:
-        #     all_videos["prediction"][:, : self.n_context_frames] = all_videos["gt"][
-        #         :, : self.n_context_frames
-        #     ]
         return all_videos
 
     def _predict_videos(
-        self, xs: Tensor, conditions: Optional[Tensor] = None
+        self, xs: Tensor, n_context_tokens: int, conditions: Optional[Tensor] = None
     ) -> Tensor:
         """
         Predict the videos with the given context, using sliding window rollouts if necessary.
@@ -137,7 +132,7 @@ class DFoTVideo(BaseVideoAlgo):
             .long()
         )
         keyframe_indices = torch.cat(
-            [torch.arange(self.n_context_tokens), keyframe_indices]
+            [torch.arange(n_context_tokens), keyframe_indices]
         ).unique()  # context frames are always keyframes
 
         if conditions is not None:
@@ -156,7 +151,7 @@ class DFoTVideo(BaseVideoAlgo):
         
         # 1. Predict the keyframes
         xs_pred_key, *_ = self._predict_sequence(
-            xs_pred[:, : self.n_context_tokens],
+            xs_pred[:, : n_context_tokens],
             length=len(keyframe_indices),
             conditions=key_conditions,
             history_guidance=history_guidance,
@@ -185,6 +180,7 @@ class DFoTVideo(BaseVideoAlgo):
         context: Tensor,
         context_mask: Optional[Tensor] = None,
         conditions: Optional[Tensor] = None,
+        **kwargs
     ) -> Tensor:
         """
         A general method for frame interpolation. Given a video of any length > 2, when the left and right key frames are known, it (iteratively, if necessary) interpolates the video, filling out all missing frames.

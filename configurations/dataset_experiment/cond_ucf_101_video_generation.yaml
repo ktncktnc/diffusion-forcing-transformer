@@ -60,9 +60,10 @@ experiment:
     val_every_n_step: 25000
     val_every_n_epoch: null
     validate_training_set: False
+    validate_history_free: True
     data:
       num_workers: 1
-    limit_batch: 4
+    limit_batch: 50
   test:
     batch_size: 32
     data:

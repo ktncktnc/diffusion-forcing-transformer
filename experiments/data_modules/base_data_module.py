@@ -102,11 +102,46 @@ class BaseDataModule(pl.LightningDataModule):
         return self._dataloader("training")
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        val_data = self._dataloader("validation")
-        if self.root_cfg.experiment.validation.validate_training_set:
-            train_data = self._dataloader("training")
-            return [val_data, train_data]
-        return val_data
+        """
+        Returns a list of validation dataloaders.
+        If `validate_history_free` is set to True, it will return the validation dataloader twice,
+        once for the history-free validation and once for the regular validation.
+        If `validate_training_set` is set to True, it will also return the training dataloader.
+        This is useful for experiments that require validation on both the training and validation sets,
+        as well as for history-free validation.
+        Returns:
+            EVAL_DATALOADERS: A list of validation dataloaders.
+        """
+        dataloaders = {}
+
+        context = self.root_cfg.algorithm.context_frames > 0
+        validate_history_free = (
+            self.root_cfg.experiment.validation.validate_history_free and context
+        )
+        validate_training_set = self.root_cfg.experiment.validation.validate_training_set
+
+        val_loader = self._dataloader("validation")
+        train_loader = self._dataloader("training") if validate_training_set else None
+
+        # Always add history-guided or history-free validation loader
+        if context:
+            dataloaders['validation_history_guided'] = val_loader
+            if validate_history_free:
+                dataloaders['validation_history_free'] = self._dataloader("validation")
+        else:
+            dataloaders['validation_history_free'] = val_loader
+
+        # Optionally add training loaders
+        if validate_training_set:
+            if context:
+                dataloaders['val_on_training_history_guided'] = train_loader
+
+            if validate_history_free:
+                dataloaders['val_on_training_history_free'] = self._dataloader("training")
+            else:
+                dataloaders['val_on_training_history_free'] = train_loader
+
+        return dataloaders
 
     def test_dataloader(self) -> EVAL_DATALOADERS:
         return self._dataloader("test")

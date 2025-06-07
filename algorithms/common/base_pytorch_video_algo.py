@@ -194,12 +194,19 @@ class BaseVideoAlgo(BasePytorchAlgo):
                         split_batch_size=self.logging.metrics_batch_size,
                     )
     
-    @staticmethod
-    def get_dataloader_str(dataloader_idx: int) -> str:
+    def get_val_dataloader_name(self, dataloader_idx: int) -> str:
         """
         Get the string representation of the dataloader index.
         """
-        return "validate_on_train" if dataloader_idx == 1 else "validation"
+        val_dataloaders = self.trainer.val_dataloaders
+        return list(val_dataloaders.keys())[dataloader_idx]
+    
+    def check_history_free_validation(self, dataloader_name):
+        """
+        Check if the validation dataloader is history-free.
+        """
+        return "history_free" in dataloader_name or "unconditional" in dataloader_name
+
     
     # ---------------------------------------------------------------------
     # Validation
@@ -221,17 +228,21 @@ class BaseVideoAlgo(BasePytorchAlgo):
                 self.on_validation_dataloader_end()
             self.validation_dataloader_idx = dataloader_idx
 
-        dataloader_str = self.get_dataloader_str(dataloader_idx)
-        self._eval_denoising(batch, batch_idx, namespace=dataloader_str)
+        dataloader_name = self.get_val_dataloader_name(dataloader_idx)
+        self._eval_denoising(batch, batch_idx, namespace=dataloader_name)
 
         # 2. Sample all videos (based on the specified tasks)
         # and log the generated videos and metrics.
         if not (
             self.trainer.sanity_checking and not self.cfg.logging.sanity_generation
-        ):
-            all_videos = self._sample_all_videos(batch, batch_idx, namespace)
+        ):  
+            # sample history-guided videos
+            n_context_tokens = 0 if self.check_history_free_validation(dataloader_name) else self.n_context_tokens
+            n_context_frames = 0 if self.check_history_free_validation(dataloader_name) else self.n_context_frames
+
+            all_videos = self._sample_all_videos(batch, batch_idx, dataloader_name, n_context_tokens=n_context_tokens)
             self._update_metrics(all_videos)
-            self._log_videos(all_videos, dataloader_str)
+            self._log_videos(all_videos, dataloader_name, n_context_frames)
         
         if self.cfg.save_attn_map.enabled:
             # TODO: unconditional 
@@ -267,7 +278,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
         batch['masks'] = masks
         batch['gt_videos'] = gt_videos
 
-        # batch = (xs, conditions, masks, gt_videos)
         output = self.training_step(batch, batch_idx, namespace=namespace)
 
         gt_videos = output["xs"]
@@ -324,7 +334,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
         Called at the end of the validation dataloader.
         This is used to reset the generator and vae for the next epoch.
         """
-        namespace = self.get_dataloader_str(self.validation_dataloader_idx)
+        namespace = self.get_val_dataloader_name(self.validation_dataloader_idx)
         print('Done with validation dataloader:', namespace)
         if self.trainer.sanity_checking and not self.cfg.logging.sanity_generation:
             return
@@ -615,7 +625,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
                 context_mask = context_mask[: self.logging.n_metrics_frames]
             metric(videos, gt_videos, context_mask=context_mask)
     
-    def _log_videos(self, all_videos: Dict[str, Tensor], namespace: str) -> None:
+    def _log_videos(self, all_videos: Dict[str, Tensor], namespace: str, context_frames=None) -> None:
         """Log videos during validation/test step."""
         all_videos = self.gather_data(all_videos)
         batch_size, n_frames = all_videos["gt"].shape[:2]
@@ -633,6 +643,9 @@ class BaseVideoAlgo(BasePytorchAlgo):
         )
         cut_videos = lambda x: x[:num_videos_to_log]
 
+        if context_frames is None:
+            context_frames=self.n_context_frames if task == "prediction" else torch.tensor([0, n_frames - 1], device=self.device, dtype=torch.long)
+
         for task in self.tasks:
             log_video(
                 cut_videos(all_videos[task]),
@@ -642,13 +655,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
                 logger=self.logger.experiment,
                 indent=self.num_logged_videos,
                 raw_dir=self.logging.raw_dir,
-                context_frames=(
-                    self.n_context_frames
-                    if task == "prediction"
-                    else torch.tensor(
-                        [0, n_frames - 1], device=self.device, dtype=torch.long
-                    )
-                ),
+                context_frames=context_frames,
                 captions=f"{task} | gt",
             )
 
