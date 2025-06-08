@@ -327,6 +327,8 @@ class BaseVideoAlgo(BasePytorchAlgo):
         if self.cfg.save_attn_map.enabled:
             register_hooks(self.diffusion_model.model, True)
 
+        self.val_metrics = {}
+
         self.validation_dataloader_idx = -1
 
     def on_validation_dataloader_end(self) -> None:
@@ -342,14 +344,8 @@ class BaseVideoAlgo(BasePytorchAlgo):
         for task in self.tasks:
             metrics = self._metrics(task).log(task)
             metrics = {f"{namespace}_{k}": v for k, v in metrics.items()}
-            self.log_dict(
-                metrics,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                sync_dist=True,
-                add_dataloader_idx=False
-            )
+
+            self.val_metrics.update(metrics)
         
         self.validation_dataloader_idx = None
 
@@ -366,6 +362,27 @@ class BaseVideoAlgo(BasePytorchAlgo):
 
         if self.cfg.save_attn_map:
             clear_hooks(self.diffusion_model.model)
+
+        if 'validation_history_guided_prediction/fvd' in self.val_metrics.keys():
+            self.val_metrics['prediction/fvd'] = self.val_metrics.pop('validation_history_guided_prediction/fvd')
+        elif 'validation_history_free_prediction/fvd' in self.val_metrics.keys():
+            self.val_metrics['prediction/fvd'] = self.val_metrics.pop('validation_history_free_prediction/fvd')
+        else:
+            raise ValueError(
+                f"FVD metric not found in {namespace} metrics: {self.val_metrics.keys()}"
+            )
+        
+        # Log the metrics for the validation epoch
+        self.log_dict(
+                self.val_metrics,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+                add_dataloader_idx=False
+            )
+        
+        self.val_metrics = None
         
 
     # ---------------------------------------------------------------------
@@ -384,6 +401,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
     # ---------------------------------------------------------------------
     # Normalization Utils
     # ---------------------------------------------------------------------
+    # TODO: check normalize for DC_AE latents
     def _normalize_x(self, xs):
         if self.is_latent_diffusion:
             # Input is in range [-1, 1], scaled by vae scaling factor
