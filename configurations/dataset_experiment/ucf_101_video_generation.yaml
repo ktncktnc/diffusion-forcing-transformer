@@ -27,7 +27,7 @@ algorithm:
       cum_snr_decay: 0.96
   logging:
     n_metrics_frames: 16
-    max_num_videos: 128
+    max_num_videos: 16
     metrics: [vbench, fvd, is, fid, lpips, mse, ssim, psnr]
   contrastive_clip_frames: 8
   diffusion_clip_frames: 16
@@ -62,6 +62,7 @@ experiment:
       num_workers: 1
     limit_batch: 50
     validate_training_set: False
+    validate_history_free: False
   test:
     batch_size: 32
     data:

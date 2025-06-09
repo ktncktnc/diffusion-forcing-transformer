@@ -250,7 +250,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
 
     def _eval_denoising(self, batch, batch_idx, namespace="training") -> None:
         """Evaluate the denoising performance during training."""
-        # xs, conditions, masks, gt_videos = batch
         xs = batch["xs"]
         conditions = batch.get("conditions")
         masks = torch.ones(*xs.shape[:2]).bool().to(self.device)
@@ -367,13 +366,11 @@ class BaseVideoAlgo(BasePytorchAlgo):
             return
 
         if 'validation_history_guided_prediction/fvd' in self.val_metrics.keys():
-            self.val_metrics['prediction/fvd'] = self.val_metrics.pop('validation_history_guided_prediction/fvd')
+            self.val_metrics['prediction/fvd'] = self.val_metrics.get('validation_history_guided_prediction/fvd')
         elif 'validation_history_free_prediction/fvd' in self.val_metrics.keys():
-            self.val_metrics['prediction/fvd'] = self.val_metrics.pop('validation_history_free_prediction/fvd')
+            self.val_metrics['prediction/fvd'] = self.val_metrics.get('validation_history_free_prediction/fvd')
         else:
-            raise ValueError(
-                f"FVD metric not found in {namespace} metrics: {self.val_metrics.keys()}"
-            )
+            raise ValueError(f"FVD metric not found in {namespace} metrics: {self.val_metrics.keys()}")
         
         # Log the metrics for the validation epoch
         self.log_dict(
@@ -403,19 +400,25 @@ class BaseVideoAlgo(BasePytorchAlgo):
     # ---------------------------------------------------------------------
     # Normalization Utils
     # ---------------------------------------------------------------------
-    # TODO: check normalize for DC_AE latents
     def _normalize_x(self, xs):
         if self.is_latent_diffusion:
-            # Input is in range [-1, 1], scaled by vae scaling factor
-            return xs * 1 / self.vae_scaling_factor
+            # Input is latent, scaled by vae scaling factor
+            shape = [1] * (xs.ndim - self.vae_mean.ndim) + list(self.vae_mean.shape)
+            mean = self.vae_mean.reshape(shape)
+            scaling_factor = self.vae_scaling_factor.reshape(shape)
+            xs = (xs - mean) * scaling_factor
+            return xs
         else:
             # Input is in range [0, 1], scaled to [-1, 1]
             return xs * 2 - 1
 
     def _unnormalize_x(self, xs):
         if self.is_latent_diffusion:
-            # Input is in range [-1, 1], scaled by vae scaling factor
-            return xs * self.vae_scaling_factor
+            # Input is latent, scaled by vae scaling factor
+            shape = [1] * (xs.ndim - self.vae_mean.ndim) + list(self.vae_mean.shape)
+            mean = self.vae_mean.reshape(shape)
+            scaling_factor = self.vae_scaling_factor.reshape(shape)
+            return 1 / scaling_factor * xs + mean
         else:
             # Input is in range [-1, 1], scaled to [0, 1]
             return (xs + 1) / 2
@@ -424,15 +427,26 @@ class BaseVideoAlgo(BasePytorchAlgo):
     # Latent
     # ---------------------------------------------------------------------
     def _load_vae_scaling_factor(self) -> None:
+        """
+        Load VAE scaling factor and mean.
+        If specified in the config, use the values from cfg.latent.
+        If not specified, try to load from the VAE model.
+        """
         if self.is_latent_diffusion:
+            if hasattr(self.cfg.latent, 'vae_scaling_factor'):
+                self.register_value(self.cfg.latent.vae_mean if hasattr(self.cfg.latent, 'vae_mean') else 0.0, 'vae_mean')
+                self.register_value(self.cfg.latent.vae_scaling_factor, 'vae_scaling_factor')
+
             if (not hasattr(self, 'vae')) or (self.vae is None):
                 self._load_vae()
             
             try:
                 if hasattr(self.vae, 'scaling_factor'):
-                    self.vae_scaling_factor = self.vae.scaling_factor
+                    vae_scaling_factor = self.vae.scaling_factor
                 else:
-                    self.vae_scaling_factor = self.vae.config.scaling_factor
+                    vae_scaling_factor = self.vae.config.scaling_factor
+                self.register_value(0.0, 'vae_mean')
+                self.register_value(vae_scaling_factor, 'vae_scaling_factor')
                 
             except AttributeError:
                 warnings.warn(
