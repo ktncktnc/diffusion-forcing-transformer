@@ -159,7 +159,7 @@ class DFoTVideo(BaseVideoAlgo):
             sliding_context_len=self.cfg.tasks.prediction.sliding_context_len
             or self.max_tokens // 2,
         )
-        xs_pred[:, keyframe_indices] = xs_pred_key
+        xs_pred[:, keyframe_indices] = xs_pred_key.to(xs_pred.dtype)
         # if is_rank_zero: # uncomment to visualize history guidance
         #     history_guidance.log(logger=self.logger)
 

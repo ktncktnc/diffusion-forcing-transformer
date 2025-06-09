@@ -3,7 +3,7 @@
 
 defaults:
   - base_pytorch_algo
-  - backbone: rnn_dit3d
+  - backbone: resnet_dit3d
 
 # dataset-dependent configurations
 x_shape: ${dataset.observation_shape}

@@ -43,6 +43,21 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
         )
         super()._build_model(diffusion_cls=diffusion_cls)
 
+    @property
+    def max_frames(self) -> int:
+        """Minus 1 since the first frame is always the context frame."""
+        return self.cfg.max_frames - 1
+
+    # ---------------------------------------------------------------------
+    # NOTE: n_{frames, tokens} indicates the number of frames/tokens
+    # that the model actually processes during training/validation.
+    # During validation, it may be different from max_{frames, tokens},
+    # ---------------------------------------------------------------------
+
+    @property
+    def n_frames(self) -> int:
+        return self.max_frames if self.trainer.training else self.cfg.n_frames - 1
+
     # ---------------------------------------------------------------------
     # Data Preprocessing
     # ---------------------------------------------------------------------
@@ -105,6 +120,7 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
                 on_step=namespace == "training",
                 on_epoch=namespace != "training",
                 sync_dist=True,
+                add_dataloader_idx=False
             )
 
         if self.cfg.reference.predict_difference:
@@ -125,14 +141,14 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
     # Sampling
     # ---------------------------------------------------------------------
     def _sample_all_videos(
-        self, batch, batch_idx, namespace="validation"
+        self, batch, batch_idx, namespace="validation", n_context_tokens=None
     ) -> Optional[Dict[str, Tensor]]:
         # xs, conditions, reference, *_, gt_videos = batch
         xs = batch["xs"]
         conditions = batch.get("conditions")
         reference = batch["reference"]
         gt_videos = batch["gt_videos"]
-
+        n_context_tokens = n_context_tokens if n_context_tokens is not None else self.n_context_tokens
         all_videos: Dict[str, Tensor] = {"gt": xs}
         
         if self.cfg.reference.predict_difference:
@@ -144,17 +160,15 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
                 if task == "prediction"
                 else self._interpolate_videos
             )
-            generated = sample_fn(xs, reference=reference, conditions=conditions)
+            generated = sample_fn(xs, reference=reference, conditions=conditions, n_context_tokens=n_context_tokens)
             if self.cfg.reference.predict_difference:
                 generated = generated + repeat(reference.unsqueeze(1), 'b n ... -> b (n n_frame) ...', n_frame=xs.shape[1])
             all_videos[task] = generated
 
         # remove None values
         all_videos = {k: v for k, v in all_videos.items() if v is not None}
-
         # rearrange/unnormalize/detach the videos
         all_videos = {k: self._unnormalize_x(v).detach() for k, v in all_videos.items()}
-
         # decode latents if using latents
         if self.is_latent_diffusion:
             if gt_videos is None:
@@ -164,11 +178,10 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
                 k: self._decode(v) if k != "gt" else gt_videos
                 for k, v in all_videos.items()
             }
-
         return all_videos
 
     def _predict_videos(
-        self, xs: Tensor, reference: Tensor, conditions: Optional[Tensor] = None
+        self, xs: Tensor, reference: Tensor, n_context_tokens: int, conditions: Optional[Tensor] = None
     ) -> Tensor:
         """
         Predict the videos with the given context, using sliding window rollouts if necessary.
@@ -191,7 +204,7 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
             .long()
         )
         keyframe_indices = torch.cat(
-            [torch.arange(self.n_context_tokens), keyframe_indices]
+            [torch.arange(n_context_tokens), keyframe_indices]
         ).unique()  # context frames are always keyframes
 
         if conditions is not None:
@@ -207,10 +220,10 @@ class ReferenceDFoTVideo(BaseVideoAlgo):
                     )
         else:
             key_conditions = None
-        
+            
         # 1. Predict the keyframes
         xs_pred_key, *_ = self._predict_sequence(
-            xs_pred[:, : self.n_context_tokens],
+            xs_pred[:, : n_context_tokens],
             length=len(keyframe_indices),
             reference=reference,
             conditions=key_conditions,

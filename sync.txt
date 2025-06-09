@@ -55,3 +55,6 @@ python -m main +name=Preprocessing_UCF101 dataset=ucf_101 algorithm=kl_autoencod
 ## Latent
 ### DMLab
 python -m main '+name=latent_16f_dfot_dmlab' 'dataset=dmlab' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=16 experiment.validation.batch_size=16
+
+### UCF101
+python -m main '+name=latent_16f_dfot_cond_ucf101' 'dataset=cond_ucf_101' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' 'dataset.max_frames=16' 'experiment.training.batch_size=16' 'experiment.validation.batch_size=16' experiment.validation.val_every_n_step=50 experiment.validation.validate_training_set=True experiment.validation.validate_history_free=True 
