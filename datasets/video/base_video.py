@@ -283,10 +283,11 @@ class BaseSimpleVideoDataset(BaseVideoDataset):
         video_metadata = self.metadata[idx]
         video = self.load_video(video_metadata, 0)
         video = self.transform(video)
+        video_paths = video_metadata['video_paths'] if isinstance(video_metadata["video_paths"], str) else video_metadata['video_paths'].as_posix()
         sample = {
             'videos': video,
             'video_lengths': self.video_length(video_metadata),
-            'video_paths': video_metadata['video_paths'].as_posix(),
+            'video_paths': video_paths,
             'latent_paths': self.video_metadata_to_latent_path(video_metadata).as_posix(),
         }
         return sample

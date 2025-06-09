@@ -5,8 +5,8 @@
 # the values here will override individual yamls files for dataset, algorithm and experiment.
 # useful for dataset-specific overrides
 defaults:
-  - ../algorithm/backbone@algorithm.backbone: dit3d
-  - ../algorithm@algorithm.vae: kl_autoencoder_preprocessor
+  # - ../algorithm/backbone@algorithm.backbone: dit3d
+  - ../algorithm@algorithm.vae: dc_ae_preprocessor # dc_ae_preprocessor, kl_autoencoder_preprocessor
 
 dataset:
   latent:
@@ -36,7 +36,7 @@ algorithm:
     patch_size: 2
     external_cond_dropout: 0.1
   vae:
-    # pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_DMLab_Res64-17035ae5.pth
+    pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_DMLab_Res64-17035ae5.pth
     batch_size: 2
   logging:
     max_num_videos: 32
@@ -57,6 +57,8 @@ experiment:
     batch_size: 16
     val_every_n_step: 25000
     val_every_n_epoch: null
+    validate_training_set: True
+    validate_history_free: True
     limit_batch: 50
     data:
       num_workers: 0

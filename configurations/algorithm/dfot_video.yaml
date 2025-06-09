@@ -3,7 +3,7 @@
 
 defaults:
   - base_pytorch_algo
-  - backbone: rnn_dit3d
+  - backbone: dit3d
 
 # dataset-dependent configurations
 x_shape: ${dataset.observation_shape}
@@ -65,7 +65,6 @@ diffusion:
   ddim_sampling_eta: 0.0
   # (For full sequence diffusion)
   reconstruction_guidance: 0.0
-
 
 # vae
 vae:

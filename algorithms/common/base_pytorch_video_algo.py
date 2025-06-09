@@ -348,6 +348,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
             self.val_metrics.update(metrics)
         
         self.validation_dataloader_idx = None
+        self.num_logged_videos = 0
 
     def on_validation_epoch_end(self, namespace="validation") -> None:
         """
@@ -358,10 +359,12 @@ class BaseVideoAlgo(BasePytorchAlgo):
         self.generator = None
         if self.is_latent_diffusion and not self.is_latent_online:
             self.vae = None
-        self.num_logged_videos = 0
 
         if self.cfg.save_attn_map:
             clear_hooks(self.diffusion_model.model)
+
+        if self.trainer.sanity_checking and not self.cfg.logging.sanity_generation:
+            return
 
         if 'validation_history_guided_prediction/fvd' in self.val_metrics.keys():
             self.val_metrics['prediction/fvd'] = self.val_metrics.pop('validation_history_guided_prediction/fvd')
@@ -383,7 +386,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
             )
         
         self.val_metrics = None
-        
 
     # ---------------------------------------------------------------------
     # Test step
@@ -647,7 +649,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
         """Log videos during validation/test step."""
         all_videos = self.gather_data(all_videos)
         batch_size, n_frames = all_videos["gt"].shape[:2]
-
         if not (
             is_rank_zero
             and self.logger
@@ -664,7 +665,9 @@ class BaseVideoAlgo(BasePytorchAlgo):
         if context_frames is None:
             context_frames=self.n_context_frames if task == "prediction" else torch.tensor([0, n_frames - 1], device=self.device, dtype=torch.long)
 
+
         for task in self.tasks:
+            # (f"{namespace}_{task}_vis")
             log_video(
                 cut_videos(all_videos[task]),
                 cut_videos(all_videos["gt"]),
