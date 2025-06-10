@@ -80,7 +80,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
 
         super().__init__(cfg)
         
-        self._load_vae_scaling_factor()
+        # self._load_vae_scaling_factor()
 
     # ---------------------------------------------------------------------
     # Data Preprocessing
@@ -162,6 +162,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
             disable=not self.cfg.compile,
         )
         print('self.diffusion_model', self.diffusion_model)
+        self.register_data_mean_std(self.cfg.data_mean, self.cfg.data_std)
 
         # 2. VAE model
         if self.is_latent_diffusion and self.is_latent_online:
@@ -400,28 +401,40 @@ class BaseVideoAlgo(BasePytorchAlgo):
     # ---------------------------------------------------------------------
     # Normalization Utils
     # ---------------------------------------------------------------------
+    # def _normalize_x(self, xs):
+    #     if self.is_latent_diffusion:
+    #         # Input is latent, scaled by vae scaling factor
+    #         shape = [1] * (xs.ndim - self.vae_mean.ndim) + list(self.vae_mean.shape)
+    #         mean = self.vae_mean.reshape(shape)
+    #         scaling_factor = self.vae_scaling_factor.reshape(shape)
+    #         xs = (xs - mean) * scaling_factor
+    #         return xs
+    #     else:
+    #         # Input is in range [0, 1], scaled to [-1, 1]
+    #         return xs * 2 - 1
+
+    # def _unnormalize_x(self, xs):
+    #     if self.is_latent_diffusion:
+    #         # Input is latent, scaled by vae scaling factor
+    #         shape = [1] * (xs.ndim - self.vae_mean.ndim) + list(self.vae_mean.shape)
+    #         mean = self.vae_mean.reshape(shape)
+    #         scaling_factor = self.vae_scaling_factor.reshape(shape)
+    #         return 1 / scaling_factor * xs + mean
+    #     else:
+    #         # Input is in range [-1, 1], scaled to [0, 1]
+    #         return (xs + 1) / 2
+
     def _normalize_x(self, xs):
-        if self.is_latent_diffusion:
-            # Input is latent, scaled by vae scaling factor
-            shape = [1] * (xs.ndim - self.vae_mean.ndim) + list(self.vae_mean.shape)
-            mean = self.vae_mean.reshape(shape)
-            scaling_factor = self.vae_scaling_factor.reshape(shape)
-            xs = (xs - mean) * scaling_factor
-            return xs
-        else:
-            # Input is in range [0, 1], scaled to [-1, 1]
-            return xs * 2 - 1
+        shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
+        mean = self.data_mean.reshape(shape)
+        std = self.data_std.reshape(shape)
+        return (xs - mean) / std
 
     def _unnormalize_x(self, xs):
-        if self.is_latent_diffusion:
-            # Input is latent, scaled by vae scaling factor
-            shape = [1] * (xs.ndim - self.vae_mean.ndim) + list(self.vae_mean.shape)
-            mean = self.vae_mean.reshape(shape)
-            scaling_factor = self.vae_scaling_factor.reshape(shape)
-            return 1 / scaling_factor * xs + mean
-        else:
-            # Input is in range [-1, 1], scaled to [0, 1]
-            return (xs + 1) / 2
+        shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
+        mean = self.data_mean.reshape(shape)
+        std = self.data_std.reshape(shape)
+        return xs * std + mean
     
     # ---------------------------------------------------------------------
     # Latent

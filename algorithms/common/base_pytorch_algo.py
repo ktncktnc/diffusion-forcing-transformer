@@ -303,3 +303,29 @@ class BasePytorchAlgo(pl.LightningModule, ABC):
         else:
             value = torch.tensor(value)
         self.register_buffer(key, value.float().to(self.device))
+        
+    def register_data_mean_std(
+        self,
+        mean: Union[str, float, Sequence],
+        std: Union[str, float, Sequence],
+        namespace: str = "data",
+    ):
+        """
+        Register mean and std of data as tensor buffer.
+
+        Args:
+            mean: the mean of data.
+            std: the std of data.
+            namespace: the namespace of the registered buffer.
+        """
+        for k, v in [("mean", mean), ("std", std)]:
+            if isinstance(v, str):
+                if v.endswith(".npy"):
+                    v = torch.from_numpy(np.load(v))
+                elif v.endswith(".pt"):
+                    v = torch.load(v)
+                else:
+                    raise ValueError(f"Unsupported file type {v.split('.')[-1]}.")
+            else:
+                v = torch.tensor(v)
+            self.register_buffer(f"{namespace}_{k}", v.float().to(self.device))
