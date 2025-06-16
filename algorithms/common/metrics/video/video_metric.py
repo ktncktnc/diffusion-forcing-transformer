@@ -233,29 +233,32 @@ class VideoMetric(nn.Module):
         dict_metrics = {}
 
         # call compute() for VBench metrics and reorganize the results
-        for metric_type, module in self._filtered_items(self.VBENCH_METRICS):
+        for metric_type, module in self.items():
             output = module.compute()
-            dict_metrics.update(
-                {
-                    f"{prefix}/{metric_type}/{key}": value
-                    for key, value in output.items()
-                }
-            )
+            if isinstance(output, Tensor):
+                dict_metrics[f"{prefix}/{metric_type}"] = output
+            else:
+                dict_metrics.update(
+                    {
+                        f"{prefix}/{metric_type}/{key}": value
+                        for key, value in output.items()
+                    }
+                )
             # NOTE: manually calling compute() requires manual call to reset() afterwards
             # if we need a functionality to log VBench several times within a single validation epoch,
             # we should move reset() to on_validation_epoch_end() in the Lightning module that uses this VideoMetric
             module.reset()
 
         # other metrics (no need to call compute())
-        dict_metrics.update(
-            {
-                f"{prefix}/{metric_type}": module
-                for metric_type, module in self._filtered_items(
-                    self.VBENCH_METRICS, not_in=True
-                )
-                if not (hasattr(module, "is_empty") and module.is_empty)
-            }
-        )
+        # dict_metrics.update(
+        #     {
+        #         f"{prefix}/{metric_type}": module
+        #         for metric_type, module in self._filtered_items(
+        #             self.VBENCH_METRICS, not_in=True
+        #         )
+        #         if not (hasattr(module, "is_empty") and module.is_empty)
+        #     }
+        # )
 
         return dict_metrics
 

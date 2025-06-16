@@ -1025,14 +1025,10 @@ class DFoTVideo(BaseVideoAlgo):
         # xs_pred = torch.where(self._extend_x_dim(context_mask) >= 1, context, xs_pred)
 
         # generate scheduling matrix
-        # scheduling_matrix = self._generate_refine_scheduling_matrix(
-        #     horizon=horizon - padding,
-        #     goback_length=goback_length,
-        #     n_goback=n_goback,
-        #     padding=padding,
-        # )        
-        scheduling_matrix = self._generate_scheduling_matrix(
+        scheduling_matrix = self._generate_refine_scheduling_matrix(
             horizon=horizon - padding,
+            goback_length=goback_length,
+            n_goback=n_goback,
             padding=padding,
         )
         # xs_pred = torch.where(self._extend_x_dim(context_mask) >= 1, context, xs_pred)
@@ -1070,9 +1066,7 @@ class DFoTVideo(BaseVideoAlgo):
             
             # Reverse process: x_tm1 ~ p(x_tm1|x_t)
             # TODO: replace x_tm1 = context_mask * x^c_tm1 + (1-context_mask) * x^g_tm1 
-            # print('\n', from_noise_levels[0,0].item(), to_noise_levels[0,0].item())
-            # if from_noise_levels[0,0].item() > to_noise_levels[0,0].item():
-            if True:
+            if from_noise_levels[0,0].item() > to_noise_levels[0,0].item():
                 # print(from_noise_levels, to_noise_levels)
                 # create a backup with all context tokens unmodified
                 xs_pred_prev = xs_pred.clone()
@@ -1100,22 +1094,21 @@ class DFoTVideo(BaseVideoAlgo):
                     conditions_mask,
                     guidance_fn=guidance_fn,
                 )
-                # xc_t = self.diffusion_model.q_sample(context, to_noise_levels)
-                # xs_pred = torch.where(
-                #     self._extend_x_dim(context_mask) == 0, xs_pred, xc_t
-                # )
-
-                pbar.update(1)
+                xc_t = self.diffusion_model.q_sample(context, to_noise_levels)
+                xs_pred = torch.where(
+                    self._extend_x_dim(context_mask) == 0, xs_pred, xc_t
+                )
             
             # Forward process: x_t ~ p(x_t|x_tm1)
-            # else:
-            #     xs_pred = self.diffusion_model.q_sample_from_x_k(
-            #         xs_pred,
-            #         from_noise_levels,
-            #         to_noise_levels
-            #     )
+            else:
+                xs_pred = self.diffusion_model.q_sample_from_x_k(
+                    xs_pred,
+                    from_noise_levels,
+                    to_noise_levels
+                )
+        
+        pbar.update(1)
 
-        # exit(0)
         if return_all:
             record.append(xs_pred.clone())
             record = torch.stack(record)

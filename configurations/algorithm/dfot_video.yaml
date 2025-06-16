@@ -39,8 +39,8 @@ replacement: noisy_scale
 
 refinement_sampling:
   enabled: False
-  goback_length: 5
-  n_goback: 5
+  goback_length: 10
+  n_goback: 10
 
 save_attn_map:
   enabled: False

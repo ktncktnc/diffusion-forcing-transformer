@@ -78,10 +78,10 @@ def run_local(cfg: DictConfig):
         if resume and not requeue_is_existing_run:
             name = None
         else:
-            if cfg.algorithm._name.startswith("dfot"):
+            if "dfot" in cfg.algorithm._name:
                 name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name}/{cfg.algorithm.backbone.name}/{cfg.algorithm.noise_level} ({output_dir.parent.name}/{output_dir.name})"
-            elif cfg.algorithm._name.startswith("gibbs_dfot"):
-                name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name}/{cfg.algorithm.backbone.name}/{cfg.algorithm.noise_level}_{str(cfg.algorithm.backbone.gibbs.mask_type)} ({output_dir.parent.name}/{output_dir.name})"
+            # elif cfg.algorithm._name.startswith("gibbs_dfot"):
+            #     name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name}/{cfg.algorithm.backbone.name}/{cfg.algorithm.noise_level}_{str(cfg.algorithm.backbone.gibbs.mask_type)} ({output_dir.parent.name}/{output_dir.name})"
             else:
                 name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name} ({output_dir.parent.name}/{output_dir.name})"
 
