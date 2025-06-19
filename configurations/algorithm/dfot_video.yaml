@@ -30,8 +30,8 @@ fixed_context:
   dropout: 0
 variable_context:
   enabled: false
-  prob: 0
-  dropout: 0
+  prob: 0.25
+  dropout: 0.3
 # sampling scheme
 chunk_size: -1
 scheduling_matrix: full_sequence

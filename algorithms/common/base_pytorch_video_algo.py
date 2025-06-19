@@ -3,9 +3,12 @@ from typing import Any, Dict
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from lightning_utilities.core.apply_func import apply_to_collection
 from omegaconf import DictConfig
+import numpy as np
 import lightning.pytorch as pl
 import torch
 import torch.nn.functional as F
+from functools import partial
+from utils.torch_utils import bernoulli_tensor
 from torch import Tensor
 from torch.optim.optimizer import Optimizer
 from lightning.pytorch.utilities.types import STEP_OUTPUT
@@ -124,7 +127,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
             ), "Masks should not be provided from the dataset when using VideoVAE."
         else:
             masks = torch.ones(*xs.shape[:2]).bool().to(self.device)
-        
         return {
             "xs": xs,
             "conditions": conditions,
@@ -273,12 +275,14 @@ class BaseVideoAlgo(BasePytorchAlgo):
         if gt_videos is not None:
             gt_videos = gt_videos[:, : self.max_frames]
 
-        batch['xs'] = xs
-        batch['conditions'] = conditions
-        batch['masks'] = masks
-        batch['gt_videos'] = gt_videos
+        eval_batch = {
+            "xs": xs,
+            "conditions": conditions,
+            "masks": masks,
+            "gt_videos": gt_videos,
+        }
 
-        output = self.training_step(batch, batch_idx, namespace=namespace)
+        output = self.training_step(eval_batch, batch_idx, namespace=namespace)
 
         gt_videos = output["xs"]
         recons = output["xs_pred"]
@@ -372,7 +376,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
             self.val_metrics['prediction/fvd'] = self.val_metrics.get('validation_history_free_prediction/fvd')
         else:
             raise ValueError(f"FVD metric not found in {namespace} metrics: {self.val_metrics.keys()}")
-        
+        print('self.val_metrics', self.val_metrics)
         # Log the metrics for the validation epoch
         self.log_dict(
                 self.val_metrics,
@@ -708,6 +712,211 @@ class BaseVideoAlgo(BasePytorchAlgo):
             )
 
         self.num_logged_videos += batch_size
+
+    #----------------------------------------------------------------------
+    # Noise scheduling
+    #----------------------------------------------------------------------
+    def _get_training_noise_levels(
+        self, xs: Tensor, masks: Tensor = None
+    ) -> Tuple[Tensor, Tensor]:
+        """Generate random noise levels for training."""
+        batch_size, n_tokens, *_ = xs.shape
+
+        # random function different for continuous and discrete diffusion
+        rand_fn = partial(
+            *(
+                (torch.rand,)
+                if self.cfg.diffusion.is_continuous
+                else (torch.randint, 0, self.timesteps)
+            ),
+            device=xs.device,
+            generator=self.generator,
+        )
+
+        # baseline training (SD: fixed_context, BD: variable_context)
+        context_mask = None
+        if self.cfg.variable_context.enabled:
+            assert (
+                not self.cfg.fixed_context.enabled
+            ), "Cannot use both fixed and variable context"
+            context_mask = bernoulli_tensor(
+                (batch_size, n_tokens),
+                self.cfg.variable_context.prob,
+                device=self.device,
+                generator=self.generator,
+            ).bool()
+        elif self.cfg.fixed_context.enabled:
+            context_indices = self.cfg.fixed_context.indices or list(
+                range(self.n_context_tokens)
+            )
+            context_mask = torch.zeros(
+                (batch_size, n_tokens), dtype=torch.bool, device=xs.device
+            )
+            context_mask[:, context_indices] = True
+
+        match self.cfg.noise_level:
+            case "random_independent":  # independent noise levels (Diffusion Forcing)
+                noise_levels = rand_fn((batch_size, n_tokens))
+            case "random_uniform":  # uniform noise levels (Typical Video Diffusion)
+                noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
+            case "interleaved":
+                odd_noise_level = rand_fn((batch_size, 1))
+                even_noise_level = rand_fn((batch_size, 1))
+                noise_levels = torch.zeros(batch_size, n_tokens, device=xs.device, dtype=odd_noise_level.dtype)
+                noise_levels[:, ::2] = odd_noise_level
+                noise_levels[:, 1::2] = even_noise_level
+                
+
+        if self.cfg.uniform_future.enabled:  # simplified training (Appendix A.5)
+            noise_levels[:, self.n_context_tokens :] = rand_fn((batch_size, 1)).repeat(
+                1, n_tokens - self.n_context_tokens
+            )
+
+        # treat frames that are not available as "full noise"
+        noise_levels = torch.where(
+            reduce(masks.bool(), "b t ... -> b t", torch.any),
+            noise_levels,
+            torch.full_like(
+                noise_levels,
+                1 if self.cfg.diffusion.is_continuous else self.timesteps - 1,
+            ),
+        )
+
+        if context_mask is not None:
+            # binary dropout training to enable guidance
+            dropout = (
+                (
+                    self.cfg.variable_context
+                    if self.cfg.variable_context.enabled
+                    else self.cfg.fixed_context
+                ).dropout
+                if self.trainer.training
+                else 0.0
+            )
+            context_noise_levels = bernoulli_tensor(
+                (batch_size, 1),
+                dropout,
+                device=xs.device,
+                generator=self.generator,
+            )
+            if not self.cfg.diffusion.is_continuous:
+                context_noise_levels = context_noise_levels.long() * (
+                    self.timesteps - 1
+                )
+            noise_levels = torch.where(context_mask, context_noise_levels, noise_levels)
+
+            # modify masks to exclude context frames from loss computation
+            context_mask = rearrange(
+                context_mask, "b t -> b t" + " 1" * len(masks.shape[2:])
+            )
+            masks = torch.where(context_mask, False, masks)
+
+        return noise_levels, masks
+    
+
+    def _generate_scheduling_matrix(
+        self,
+        horizon: int,
+        padding: int = 0,
+    ):
+        match self.cfg.scheduling_matrix:
+            case "full_sequence" | "gibbs":
+                scheduling_matrix = np.arange(self.sampling_timesteps, -1, -1)[
+                    :, None
+                ].repeat(horizon, axis=1)
+            case "autoregressive":
+                scheduling_matrix = self._generate_pyramid_scheduling_matrix(
+                    horizon, self.sampling_timesteps
+                )
+            case "interleaved":
+                scheduling_matrix = self._generate_interleaved_scheduling_matrix(
+                    horizon, 3, self.sampling_timesteps
+                )
+
+        scheduling_matrix = torch.from_numpy(scheduling_matrix).long()
+        scheduling_matrix = self.diffusion_model.ddim_idx_to_noise_level(
+            scheduling_matrix
+        )
+
+        if self.cfg.scheduling_matrix == "gibbs":
+            n_sampling_steps = scheduling_matrix.shape[0]
+            scheduling_matrix = repeat(scheduling_matrix, 't b -> (t h) b', h=horizon)
+            for i in range(1, n_sampling_steps):
+                for j in range(horizon):
+                    scheduling_matrix[i * horizon + j, j+1:] = scheduling_matrix[(i-1) * horizon + horizon - 1, j+1:]
+
+        # paded entries are labeled as pure noise
+        scheduling_matrix = F.pad(
+            scheduling_matrix, (0, padding, 0, 0), value=self.timesteps - 1
+        )
+        # torch.set_printoptions(profile="full", linewidth=20000)
+        # print(scheduling_matrix)
+        # exit(0)
+
+        return scheduling_matrix
+
+    def _generate_interleaved_scheduling_matrix(
+        self,
+        horizon: int,
+        interleaved_size = 2,
+        sampling_timesteps: int = 50,
+    ):
+        noise_levels = []
+        max_length = sampling_timesteps + interleaved_size
+        for i in range(horizon):
+            # only for non-symmetric case
+            start_idx = i%interleaved_size + 1
+            # start_idx = interleaved_size - i%interleaved_size
+            cur_noise_levels = [sampling_timesteps]*start_idx
+            for j in range(sampling_timesteps):
+                noise_idx = max(sampling_timesteps - start_idx - interleaved_size*j, 0)
+                if noise_idx == 0:
+                    cur_noise_levels += [noise_idx] * (max_length - len(cur_noise_levels))
+                    break
+                else:
+                    cur_noise_levels += [noise_idx] * interleaved_size
+                    
+            noise_levels.append(cur_noise_levels)
+        noise_levels = np.array(noise_levels)
+        return noise_levels.T
+
+    def _generate_pyramid_scheduling_matrix(self, horizon: int, sampling_timesteps:int, uncertainty_scale: float = 1.0):
+        height = sampling_timesteps + int((horizon - 1) * uncertainty_scale) + 1
+        scheduling_matrix = np.zeros((height, horizon), dtype=np.int64)
+        for m in range(height):
+            for t in range(horizon):
+                scheduling_matrix[m, t] = sampling_timesteps + int(t * uncertainty_scale) - m
+
+        return np.clip(scheduling_matrix, 0, sampling_timesteps)
+
+    def _generate_refine_scheduling_matrix(
+        self,
+        horizon: int,
+        goback_length: int,
+        n_goback: int,
+        padding: int = 0,
+    ):
+        assert self.cfg.scheduling_matrix == 'full_sequence', "Refining only support full_sequence scheduling matrix"
+        scheduling_matrix = np.arange(self.sampling_timesteps, -1, -1)
+        final_scheduling_matrix = []
+
+        goback_idxs = [i for i in range(1, self.sampling_timesteps - goback_length, goback_length)]
+        for t in scheduling_matrix:
+            final_scheduling_matrix.append(t)
+            if t in goback_idxs:
+                for i in range(n_goback):
+                    final_scheduling_matrix = final_scheduling_matrix + [s for s in range(t+1,t+goback_length+1)]
+                    final_scheduling_matrix = final_scheduling_matrix + [s for s in range(t+goback_length-1,t-1,-1)]
+        
+        final_scheduling_matrix = torch.tensor(final_scheduling_matrix).long()
+        scheduling_matrix = self.diffusion_model.ddim_idx_to_noise_level(final_scheduling_matrix)[:, None].repeat(1, horizon)
+        
+        # paded entries are labeled as pure noise
+        scheduling_matrix = F.pad(
+            scheduling_matrix, (0, padding, 0, 0), value=self.timesteps - 1
+        )
+
+        return scheduling_matrix
 
     # ---------------------------------------------------------------------
     # Length-related Properties and Utils
