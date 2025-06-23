@@ -89,7 +89,7 @@ class Attention(nn.Module):
         qkv = (
             self.qkv(x)
             .reshape(B, N, 3, self.num_heads, self.head_dim)
-            .permute(2, 0, 3, 1, 4)
+            .permute(2, 0, 3, 1, 4) # (3, batch_size, num_heads, num_tokens, head_dim)
         )
         q, k, v = qkv.unbind(0)
         q, k = self.q_norm(q), self.k_norm(k)
@@ -123,6 +123,94 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x
 
+
+def matrix_mul(x, u, v):
+    # Perform matrix multiplication
+    return torch.matmul(torch.matmul(u.T, x), v)
+
+class MatrixAttention(nn.Module):
+    """
+    Matrix attention block.
+    This is a simplified version of the attention block that does not use RoPE.
+    It is used in the DiT model for the final layer.
+    """
+
+    def __init__(
+        self, 
+        col_dim: int,
+        row_dim: int,
+        embed_col_dim: Optional[int] = None,
+        embed_row_dim: Optional[int] = None, 
+        num_col_heads: int = 4,
+        num_row_heads: int = 4,
+        qk_norm: bool = False,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
+        norm_layer: nn.Module = nn.LayerNorm,
+        rope = None,
+        **kwargs
+        # fused_attn: bool = True,
+    ):
+        super().__init__()
+        self.col_dim = col_dim
+        self.row_dim = row_dim
+        self.embed_col_dim = embed_col_dim if embed_col_dim is not None else col_dim
+        self.embed_row_dim = embed_row_dim if embed_row_dim is not None else row_dim
+        self.num_row_heads = num_row_heads
+        self.num_col_heads = num_col_heads
+        self.num_heads = num_col_heads * num_row_heads
+        assert self.embed_col_dim % num_col_heads == 0, "embed_col_dim must be divisible by num_col_heads"
+        assert self.embed_row_dim % num_row_heads == 0, "embed_row_dim must be divisible by num_row_heads"
+        self.head_col_dim = self.embed_col_dim // num_col_heads
+        self.head_row_dim = self.embed_row_dim // num_row_heads
+        self.scale = (self.head_col_dim*self.head_row_dim)**-0.5
+
+        self.qkv_u = nn.Parameter(torch.zeros(col_dim, self.embed_col_dim))
+        self.qkv_v = nn.Parameter(torch.zeros(row_dim, self.embed_row_dim*3))
+        self.q_norm = norm_layer(self.head_col_dim) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(self.head_row_dim) if qk_norm else nn.Identity()
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj_u = nn.Parameter(torch.zeros(self.embed_col_dim, col_dim))
+        self.proj_v = nn.Parameter(torch.zeros(self.embed_row_dim, row_dim))
+        self.proj_drop = nn.Dropout(proj_drop)
+        self.rope = rope
+
+
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        timestep=None,
+        height: int = None,
+        width: int = None
+    ) -> torch.Tensor:
+        B, L, H, W = x.shape
+        qkv = (
+            matrix_mul(x, self.qkv_u, self.qkv_v) # BLH*3,W
+            .reshape(B, L, 3, self.num_heads, self.head_col_dim, self.head_row_dim)
+            .permute(2, 0, 3, 1, 4, 5)
+        )
+        q, k, v = qkv.unbind(0) # batch_size, n_heads, n_tokens, height, width
+        q, k = self.q_norm(q), self.k_norm(k) 
+
+        # Currently, only support RoPE1D, add positional embeddings for each frame.
+        # I think the matrix is already support position of height, width inside a frame.
+        # TODO: check if this is correct.
+        # if self.rope is not None:
+        #     q = self.rope(q.flatten(-2,-1)).reshape(B, self.num_heads, L, self.head_col_dim, self.head_row_dim)
+        #     k = self.rope(k.flatten(-2,-1)).reshape(B, self.num_heads, L, self.head_col_dim, self.head_row_dim)
+
+        attn_map = torch.einsum('bnihw,bnjhw->bnij', q, k)  # (B, num_heads, N, N)
+        attn_map = (attn_map/self.scale).softmax(dim=-1)  # shape: (B, num_heads, N, N)
+
+        x = torch.einsum('bnij,bnjhw->bnihw', self.attn_drop(attn_map), v) # (B, num_heads, num_tokens, H, W)
+        x = x.permute(0, 2, 1, 3, 4)  # (B, N, num_heads, H, W)
+        x = x.reshape(B, L, self.num_col_heads * self.head_col_dim, self.num_row_heads * self.head_row_dim)
+        x = matrix_mul(x, self.proj_u, self.proj_v)  # (B, N, C)
+        x = self.proj_drop(x)
+        if hasattr(self, "store_attn_map"):
+            raise NotImplementedError("MatrixAttention does not support storing attention maps.")
+
+        return x
 
 class AdaLayerNorm(nn.Module):
     """
@@ -289,3 +377,126 @@ class DITFinalLayer(nn.Module):
         x = self.norm_final(x, c)
         x = self.linear(x)
         return x
+
+
+# ---------------------------------------------------------------------
+# Matrix DiT
+# ---------------------------------------------------------------------
+
+class MatrixDiTBlock(nn.Module):
+    """
+    A MatrixDiT transformer block with adaptive layer norm zero (AdaLN-Zero) conditioning.
+    """
+
+    def __init__(
+        self,
+        col_hidden_size: int,
+        row_hidden_size: int,
+        num_col_heads: int,
+        num_row_heads: int,
+        embed_col_dim: Optional[int] = None,
+        embed_row_dim: Optional[int] = None,
+        mlp_ratio: Optional[float] = 4.0,
+        rope: Optional[RotaryEmbeddingND] = None,
+        **block_kwargs: dict,
+    ):
+        """
+        Args:
+            hidden_size: Number of features in the hidden layer.
+            num_heads: Number of attention heads.
+            mlp_ratio: Ratio of hidden layer size in the MLP. None to skip the MLP.
+            block_kwargs: Additional arguments to pass to the Attention block.
+        """
+        super().__init__()
+
+        self.norm1 = AdaLayerNormZero(row_hidden_size)
+        self.attn = MatrixAttention(
+            col_dim=col_hidden_size,
+            row_dim=row_hidden_size,
+            embed_col_dim=embed_col_dim,
+            embed_row_dim=embed_row_dim,
+            num_col_heads=num_col_heads,
+            num_row_heads=num_row_heads,
+            rope=rope, 
+            **block_kwargs
+        )
+        self.use_mlp = mlp_ratio is not None
+        if self.use_mlp:
+            self.norm2 = AdaLayerNormZero(row_hidden_size)
+            self.mlp = Mlp(
+                in_features=row_hidden_size,
+                hidden_features=int(row_hidden_size * mlp_ratio),
+                act_layer=partial(nn.GELU, approximate="tanh"),
+            )
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        # Initialize transformer linear layers:
+        def _basic_init(module: nn.Module):
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, MatrixAttention):
+                # Initialize the projection matrices in MatrixAttention
+                nn.init.xavier_uniform_(module.qkv_u)
+                nn.init.xavier_uniform_(module.qkv_v)
+                nn.init.xavier_uniform_(module.proj_u)
+                nn.init.xavier_uniform_(module.proj_v)
+
+        self.attn.apply(_basic_init)
+        if self.use_mlp:
+            self.mlp.apply(_basic_init)
+
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        c: torch.Tensor, 
+        t: torch.Tensor=None,
+        height: int = None,
+        width: int = None,
+    ) -> torch.Tensor:
+        """
+        Forward pass of the DiT block.
+        In original implementation, conditioning is uniform across all tokens in the sequence. Here, we extend it to support token-wise conditioning (e.g. noise level can be different for each token).
+        Args:timesteps
+            x: Input tensor of shape (B, N, C).
+            c: Conditioning tensor of shape (B, N, C).
+        """
+        B, N, C = x.shape
+        n_frames = t.shape[-1]
+        x, gate_msa = self.norm1(x, c)
+        x = x + gate_msa * self.attn(x.reshape(B, n_frames, N//n_frames, C), t, height, width).reshape(B, N, C)
+        if self.use_mlp:
+            x, gate_mlp = self.norm2(x, c)
+            x = x + gate_mlp * self.mlp(x)
+        return x
+
+
+if __name__ == "__main__":
+    # Test matrix DiT block
+    batch_size, n_frames, n_tokens, token_dim = 5, 16, 1024*16, 768
+    from algorithms.dfot.backbones.modules.embeddings import RotaryEmbedding1D
+    
+    rope = RotaryEmbedding1D(
+        128*128, 16
+    )
+    block = MatrixDiTBlock(
+        col_hidden_size=1024,
+        row_hidden_size=token_dim,
+        num_col_heads=4,
+        num_row_heads=4,
+        embed_col_dim=512,
+        embed_row_dim=512,
+        mlp_ratio=4.0,
+        rope=rope,
+    )
+
+    x = torch.randn(batch_size, n_tokens, token_dim)
+    print("Input shape:", x.shape)  # Should be (batch_size, n_tokens, token_dim)
+    out = block(
+        x,
+        c=torch.randn(batch_size, n_tokens, token_dim),
+        # t=torch.randint(0, 1000, (batch_size, n_frames))
+    )
+    print("Output shape:", out.shape)  # Should be (batch_size, n_tokens, token_dim)

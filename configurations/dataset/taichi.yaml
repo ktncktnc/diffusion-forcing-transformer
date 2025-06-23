@@ -1,0 +1,21 @@
+# Important: Be careful when modifying this file! 
+# The fields in file will be overridden by the dataset dependent config file in the `configurations/dataset_experiment` folder so consider making changes there instead! 
+
+defaults:
+  - base_video
+
+latent:
+  enabled: True
+  # suffix: 1a8547fb
+  num_channels: 32
+save_dir: /scratch/s224075134/temporal_diffusion/datasets/video/taichi
+max_frames: 16
+frame_skip: 1
+context_length: 4
+resolution: 256
+data_mean: [0]
+data_std: [0.5] # scaling factor
+
+# unconditional
+external_cond_type: null
+external_cond_dim: 0

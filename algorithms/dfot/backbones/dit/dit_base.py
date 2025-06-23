@@ -12,9 +12,10 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 from einops import rearrange
-from ..modules.embeddings import RotaryEmbedding3D
+from ..modules.embeddings import RotaryEmbedding1D, RotaryEmbedding3D
 from .dit_blocks import (
     DiTBlock,
+    MatrixDiTBlock,
     DITFinalLayer,
 )
 
@@ -48,6 +49,7 @@ class DiTBase(nn.Module):
         mlp_ratio: float = 4.0,
         learn_sigma: bool = True,
         use_gradient_checkpointing: bool = False,
+        **kwargs
     ):
         """
         Args:
@@ -77,6 +79,7 @@ class DiTBase(nn.Module):
         self.variant = variant
         self.pos_emb_type = pos_emb_type
         self.use_gradient_checkpointing = use_gradient_checkpointing
+        self.kwargs = kwargs
 
         match self.pos_emb_type:
             case "learned_1d":
@@ -111,47 +114,102 @@ class DiTBase(nn.Module):
                 )
             case "rope_3d":
                 rope = RotaryEmbedding3D(
-                    dim=self.hidden_size // num_heads,
-                    sizes=(
-                        self.max_temporal_length,
-                        self.spatial_grid_size,
-                        self.spatial_grid_size,
-                    ),
-                )
+                        dim=self.hidden_size // num_heads,
+                        sizes=(
+                            self.max_temporal_length,
+                            self.spatial_grid_size,
+                            self.spatial_grid_size,
+                        ),
+                    )
+            # case "rope_1d":
+        if self.is_matrix_factorized or self.is_full_matrix:
+            rope = RotaryEmbedding1D(
+                dim=kwargs.get("embed_col_dim", self.num_patches) // kwargs.get("num_col_heads", num_heads) * kwargs.get("embed_row_dim", hidden_size) //kwargs.get("num_row_heads", num_heads),
+                seq_len=self.max_temporal_length
+            )
 
-        self.blocks = nn.ModuleList(
-            [
-                DiTBlock(
-                    hidden_size=hidden_size,
-                    num_heads=num_heads,
-                    mlp_ratio=(
-                        mlp_ratio if self.variant != "factorized_attention" else None
-                    ),
-                    rope=rope if self.pos_emb_type == "rope_3d" else None,
-                )
-                for _ in range(depth)
-            ]
-        )
-        self.temporal_blocks = (
-            nn.ModuleList(
+        if self.is_full_matrix:
+            self.blocks = nn.ModuleList(
                 [
-                    DiTBlock(
-                        hidden_size=hidden_size,
+                    MatrixDiTBlock(
+                        col_hidden_size=self.num_patches,
+                        row_hidden_size=hidden_size,
+                        embed_col_dim=kwargs.get("embed_col_dim", self.num_patches),
+                        embed_row_dim=kwargs.get("embed_row_dim", hidden_size),
+                        num_col_heads=self.kwargs.get("num_col_heads", num_heads),
+                        num_row_heads=self.kwargs.get("num_row_heads", num_heads),
                         num_heads=num_heads,
                         mlp_ratio=mlp_ratio,
+                        rope=rope
                     )
                     for _ in range(depth)
                 ]
             )
-            if self.is_factorized
-            else None
-        )
+        else:
+            self.blocks = nn.ModuleList(
+                [
+                    DiTBlock(
+                        hidden_size=hidden_size,
+                        num_heads=num_heads,
+                        mlp_ratio=(
+                            mlp_ratio if self.variant != "factorized_attention" else None
+                        ),
+                        rope=rope if self.pos_emb_type == "rope_3d" else None,
+                    )
+                    for _ in range(depth)
+                ]
+            )
+
+        if self.is_factorized:
+            if self.is_matrix_factorized:
+                # TODO:
+                self.temporal_blocks = (
+                    nn.ModuleList(
+                        [
+                            MatrixDiTBlock(
+                                col_hidden_size=self.num_patches,
+                                row_hidden_size=hidden_size,
+                                embed_col_dim=kwargs.get("embed_col_dim", self.num_patches),
+                                embed_row_dim=kwargs.get("embed_row_dim", hidden_size),
+                                num_col_heads=self.kwargs.get("num_col_heads", num_heads),
+                                num_row_heads=self.kwargs.get("num_row_heads", num_heads),
+                                num_heads=num_heads,
+                                mlp_ratio=mlp_ratio,
+                                rope=rope
+                            )
+                            for _ in range(depth)
+                        ]
+                    )
+                )
+            else:
+                self.temporal_blocks = (
+                    nn.ModuleList(
+                        [
+                            DiTBlock(
+                                hidden_size=hidden_size,
+                                num_heads=num_heads,
+                                mlp_ratio=mlp_ratio,
+                            )
+                            for _ in range(depth)
+                        ]
+                    )
+                )
+        else:
+            self.temporal_blocks = None
 
         self.final_layer = DITFinalLayer(hidden_size, self.out_channels)
 
     @property
     def is_factorized(self) -> bool:
-        return self.variant in {"factorized_encoder", "factorized_attention"}
+        return self.variant in {"factorized_encoder", "factorized_attention", "factorized_matrix_attention"}
+    
+    @property
+    def is_matrix_factorized(self) -> bool:
+        return self.variant == "factorized_matrix_attention"
+    
+    @property
+    def is_full_matrix(self) -> bool:
+        return self.variant == 'full_matrix_attention'
 
     @property
     def is_pos_emb_absolute_once(self) -> bool:
@@ -173,7 +231,7 @@ class DiTBase(nn.Module):
 
     @staticmethod
     def _check_args(num_patches: Optional[int], variant: Variant, pos_emb_type: PosEmb):
-        if variant not in {"full", "factorized_encoder", "factorized_attention"}:
+        if variant not in {"full", "factorized_encoder", "factorized_attention", "factorized_matrix_attention", "full_matrix_attention"}:
             raise ValueError(f"Unknown variant {variant}")
         if pos_emb_type not in {
             "learned_1d",
@@ -181,6 +239,7 @@ class DiTBase(nn.Module):
             "sinusoidal_3d",
             "sinusoidal_factorized",
             "rope_3d",
+            "rope_1d"
         }:
             raise ValueError(f"Unknown positional embedding type {pos_emb_type}")
         if num_patches is None:
@@ -266,22 +325,29 @@ class DiTBase(nn.Module):
                 else:
                     img_states["x"] = img_result
 
+        # learned_1d, sinusoidal_1d, sinusoidal_3d
         if self.is_pos_emb_absolute_once:
             execute_in_parallel(lambda x, c, batch_size: self.pos_emb(x))
-        if self.is_pos_emb_absolute_factorized and not self.is_factorized:
 
+        # full sinusoidal 3D positional embedding
+        if self.is_pos_emb_absolute_factorized and not self.is_factorized:
             def add_pos_emb(
                 x: torch.Tensor, _: torch.Tensor, batch_size: int
             ) -> torch.Tensor:
                 x = rearrange(x, "b (t p) c -> (b t) p c", p=self.num_patches)
                 x = self.spatial_pos_emb(x)
-                x = rearrange(x, "(b t) p c -> (b p) t c", b=batch_size)
-                x = self.temporal_pos_emb(x)
-                x = rearrange(x, "(b p) t c -> b (t p) c", b=batch_size)
+                #---------------------
+                # Full matrix attention uses rope_1d for temporal positional embedding
+                #---------------------
+                if not self.is_full_matrix:
+                    x = rearrange(x, "(b t) p c -> (b p) t c", b=batch_size)
+                    x = self.temporal_pos_emb(x)
+                    x = rearrange(x, "(b p) t c -> b (t p) c", b=batch_size)
                 return x
 
             execute_in_parallel(add_pos_emb)
 
+        # factorized sinusoidal_factorized
         if self.is_factorized:
             execute_in_parallel(
                 lambda x, c, batch_size: rearrange_contiguous_many(
@@ -294,9 +360,29 @@ class DiTBase(nn.Module):
         for i, (block, temporal_block) in enumerate(
             zip(self.blocks, self.temporal_blocks or [None for _ in range(self.depth)])
         ):
+            # spatial block or full block
             execute_in_parallel(lambda x, c, batch_size: self.checkpoint(block, x, c, t, height, width))
 
-            if self.is_factorized:
+            if self.is_matrix_factorized:
+                #----------------------------
+                # Currently, for factorized matrix attention, sinusoidal_factorized positional embeddings are used for spatial
+                # and rope_1d for temporal
+                #----------------------------
+                execute_in_parallel(
+                    lambda x, c, batch_size: rearrange_contiguous_many(
+                        (x, c), "(b t) p c -> b (p t) c", b=batch_size
+                    )
+                )
+                execute_in_parallel(
+                    lambda x, c, batch_size: self.checkpoint(temporal_block, x, c, t, height, width)
+                )
+                execute_in_parallel(
+                    lambda x, c, batch_size: rearrange_contiguous_many(
+                        (x, c), "b (p t) c -> (b t) p c", b=batch_size, p=self.num_patches
+                    )
+                )
+
+            elif self.is_factorized:
                 execute_in_parallel(
                     lambda x, c, batch_size: rearrange_contiguous_many(
                         (x, c), "(b t) p c -> (b p) t c", b=batch_size

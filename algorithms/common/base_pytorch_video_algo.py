@@ -477,7 +477,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
         """
         Load the pretrained VAE model.
         """
-        if hasattr(self.cfg.vae, 'name') and self.cfg.vae.name == "dc_ae_preprocessor":
+        if hasattr(self.cfg.vae, 'name') and "dc_ae" in self.cfg.vae.name:
             # NOTE: this is a special case for the DC-AE preprocessor
             # that is used for training the latent diffusion model
             self.vae = MyAutoencoderDC.from_pretrained(

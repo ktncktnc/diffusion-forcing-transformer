@@ -1,7 +1,10 @@
 rsync -a outputs s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage/projects/temporal_diffusion/diffusion-forcing-transformer --info=progress
 
+rsync s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage2/projects/temporal_diffusion/diffusion-forcing-transformer/outputs/dmlab_2025-06-20_15-47-20.tar .
 
 rsync -a minecraft_latent_32_1cd9pgpb.zip s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage/projects/temporal_diffusion/datasets/video
+
+rsync --info=progress2 -a s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage/projects/temporal_diffusion/datasets/video/taichi.zip .
 
 
 python -m main '+name=UCF_101_dit3d' 'dataset=ucf_101' 'algorithm=contrastive_dfot_video' 'experiment=video_generation' 'algorithm.contrastive_loss_weight=0' 'algorithm.backbone=null' '++algorithm.backbone.name=dit3d' '++algorithm.backbone.variant=full' '++algorithm.backbone.pos_emb_type=rope_3d' '++algorithm.backbone.patch_size=2' '++algorithm.backbone.hidden_size=384' '++algorithm.backbone.depth=12' '++algorithm.backbone.num_heads=6' '++algorithm.backbone.mlp_ratio=4.0' 'load=/weka/s224075134/temporal_diffusion/diffusion-forcing-transformer/outputs/2025-04-14/14-43-35/checkpoints/epoch\=89-step\=168750.ckpt' experiment.validation.limit_batch=200 experiment.tasks=[validation] '++algorithm.backbone.use_gradient_checkpointing=False'
@@ -47,6 +50,10 @@ python -m main +name=difference_reference_dfot_cond_ucf_101_4_to_16 dataset=cond
 python -m main +name=Preprocessing_DMLAB dataset=dmlab algorithm=kl_autoencoder_preprocessor experiment=video_latent_preprocessing wandb.mode=disabled
 ## UCF101
 python -m main +name=Preprocessing_UCF101 dataset=ucf_101 algorithm=kl_autoencoder_preprocessor experiment=video_latent_preprocessing wandb.mode=disabled
+## Minecraft
+python -m main +name=Preprocessing_Minecraft dataset=minecraft algorithm=kl_autoencoder_preprocessor experiment=video_latent_preprocessing wandb.mode=disabled
+python -m main +name=Preprocessing_Minecraft dataset=minecraft algorithm=dc_ae_16x_autoencoder_preprocessor experiment=video_latent_preprocessing wandb.mode=disabled
+## Taichi
 
 # Training
 
@@ -54,7 +61,70 @@ python -m main +name=Preprocessing_UCF101 dataset=ucf_101 algorithm=kl_autoencod
 
 ## Latent
 ### DMLab
-python -m main '+name=latent_16f_dfot_dmlab' 'dataset=dmlab' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=16 experiment.validation.batch_size=16
+python -m main '+name=latent_16f_dfot_dmlab' 'dataset=dmlab' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=32 experiment.validation.batch_size=32
+
+#### IL
+python -m main '+name=DFOT_DMLAB_16_IL' 'dataset=dmlab' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=16 experiment.validation.batch_size=32 algorithm.noise_level=interleaved algorithm.scheduling_matrix=interleaved algorithm.variable_context.enabled=True experiment.validation.validate_training_set=False
 
 ### UCF101
 python -m main '+name=latent_16f_dfot_cond_ucf101' 'dataset=cond_ucf_101' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' 'dataset.max_frames=16' 'experiment.training.batch_size=16' 'experiment.validation.batch_size=16' experiment.validation.val_every_n_step=50 experiment.validation.validate_training_set=True experiment.validation.validate_history_free=True 
+
+### BAIR
+python -m main '+name=DFOT_BAIR_16_RI' 'dataset=bair' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=32 experiment.validation.batch_size=32 experiment.validation.validate_history_free=True validation.validate_training_set=False
+
+### Minecraft
+python -m main '+name=DFOT_MCRAFT_16_RI' 'dataset=minecraft' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=32 experiment.validation.batch_size=32 experiment.validation.validate_history_free=False experiment.validation.validate_training_set=False
+
+python -m main '+name=DFOT_MCRAFT_16_RU' 'dataset=minecraft' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=16 experiment.validation.batch_size=32 experiment.validation.validate_history_free=False experiment.validation.validate_training_set=False algorithm.noise_level=random_uniform algorithm.variable_context.enabled=True cluster=a2i2_weka
+
+python -m main '+name=DFOT_MCRAFT_16_IL' 'dataset=minecraft' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=16 experiment.validation.batch_size=32 experiment.validation.validate_history_free=False experiment.validation.validate_training_set=False algorithm.noise_level=interleaved algorithm.scheduling_matrix=interleaved algorithm.variable_context.enabled=True cluster=a2i2_weka
+
+
+python -m main '+name=DFOT_DMLAB_16_IL' 'dataset=dmlab' 'algorithm=dfot_video' 'experiment=video_generation' '++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}' dataset.max_frames=16 experiment.training.batch_size=16 experiment.validation.batch_size=32 algorithm.noise_level=interleaved algorithm.scheduling_matrix=interleaved algorithm.variable_context.enabled=True experiment.validation.validate_training_set=False
+
+
+
+# MatDiT
+python -m main '+name=latent_16f_dfot_dmlab' 'dataset=dmlab' 'algorithm=dfot_video' 'experiment=video_generation' dataset.max_frames=16 experiment.training.batch_size=16 experiment.validation.batch_size=16 wandb.mode=disabled @MatDiT/B
+
+
+# Validation
+
+## DMLAB_16
+
+### DFoT-random_independent
+
+python -m main +name=EVAL_DFOT_DMLAB_16 dataset=dmlab algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-06-09/14-53-28/checkpoints/epoch\=0-step\=500000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled
+
+### DFoT-random_uniform
+
+python -m main +name=EVAL_DFOT_DMLAB_16 dataset=dmlab algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-06-09/19-43-35/checkpoints/epoch\=0-step\=500000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled
+
+### REFDFot-random_independent
+
+### IL
+python -m main +name=EVAL_DFOT_DMLAB_16 dataset=dmlab algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-06-19/00-07-52/checkpoints/epoch\=0-step\=350000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled algorithm.scheduling_matrix=interleaved algorithm.diffusion.sampling_timesteps=50 
+
+
+
+## UCF101_16
+### DFoT-random_independent
+
+python -m main +name=EVAL_DFOT_UCF101_16_RI dataset=cond_ucf_101 algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" 'load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/cond_ucf_101/dfot_video/2025-05-14/22-09-27/checkpoints/epoch\=15-step\=810027.ckpt' experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=32 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled
+
+
+### DFoT-random-uniform
+
+python -m main +name=EVAL_DFOT_UCF101_16_RU dataset=cond_ucf_101 algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" 'load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/cond_ucf_101/dfot_video/2025-06-09/19-33-37/checkpoints/epoch\=6-step\=625025.ckpt' experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=32 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled
+
+
+### REFDFoT-random_uniform
+
+python -m main +name=uniform_reference_dfot_cond_ucf_101_4_to_16 dataset=cond_ucf_101 algorithm=reference_dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/cond_ucf_101/reference_dfot_video/2025-06-10/09-43-46/checkpoints/last.ckpt experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=0 dataset.frame_skip=1 dataset.max_frames=17 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False
+
+
+## BAIR_16
+
+### DFoT-random_independent
+
+python -m main +name=EVAL_DFOT_BAIR_16 dataset=bair algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/bair/dfot_video/2025-06-18/16-18-21/checkpoints/epoch\=7-step\=150000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.max_frames=16 experiment.validation.batch_size=32 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled

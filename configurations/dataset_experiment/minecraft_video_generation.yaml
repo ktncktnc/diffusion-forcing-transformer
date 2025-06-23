@@ -4,21 +4,23 @@
 # When the (dataset, experiment) pair aligns with the file name of this yaml, 
 # the values here will override individual yamls files for dataset, algorithm and experiment.
 # useful for dataset-specific overrides
-
+defaults:
+  # - ../algorithm/backbone@algorithm.backbone: dit3d
+  - ../algorithm@algorithm.vae: dc_ae_16x_preprocessor # dc_ae_preprocessor, kl_autoencoder_preprocessor
 dataset:
   latent:
     enabled: True
-  subdataset_size: 64000
+  # subdataset_size: 64000
   num_eval_videos: 768
-  max_frames: 50
+  max_frames: 16
 
 algorithm:
   lr_scheduler:
     name: constant_with_warmup
-    num_warmup_steps: 10000
-    num_training_steps: c
+    num_warmup_steps: 50000
+    num_training_steps: 1000000
   weight_decay: 0.001
-  compile: true_without_ddp_optimizer
+  compile: False
   diffusion:
     loss_weighting:
       strategy: sigmoid
@@ -35,7 +37,9 @@ algorithm:
     patch_size: 2
     external_cond_dropout: 0.1
   vae:
-    pretrained_path: pretrained:ImageVAE_MCRAFT.ckpt
+    # DFoT vae: pretrained:ImageVAE_MCRAFT.ckpt
+    # FAR vae: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_Minecraft_Res128-a5677f66.pth
+    pretrained_path: /scratch/s224075134/temporal_diffusion/FAR/pretrained/dcae/DCAE_Minecraft_Res128-a5677f66.pth 
     batch_size: 2
   logging:
     max_num_videos: 32
@@ -58,9 +62,11 @@ experiment:
       save_top_k: -1
   validation:
     batch_size: 16
-    val_every_n_step: 1.0
-    val_every_n_epoch: 1
-    limit_batch: 1.0
+    val_every_n_step: 25000
+    val_every_n_epoch: null
+    validate_training_set: True
+    validate_history_free: True
+    limit_batch: 50
     data:
       num_workers: 0
   test:

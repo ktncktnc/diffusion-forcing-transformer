@@ -60,10 +60,14 @@ class DiT3D(BaseBackbone):
             pos_emb_type=cfg.pos_emb_type,
             hidden_size=hidden_size,
             depth=cfg.depth,
-            num_heads=cfg.num_heads,
+            num_heads=cfg.get("num_heads", None),
             mlp_ratio=cfg.mlp_ratio,
             learn_sigma=False,
             use_gradient_checkpointing=cfg.use_gradient_checkpointing,
+            embed_col_dim=cfg.get("embed_col_dim", None),
+            embed_row_dim=cfg.get("embed_row_dim", None),
+            num_col_heads=cfg.get("num_col_heads", None),
+            num_row_heads=cfg.get("num_row_heads", None),
         )
         self.initialize_weights()
 
@@ -128,6 +132,7 @@ class DiT3D(BaseBackbone):
     ) -> torch.Tensor:
         input_batch_size = x.shape[0]
         x = rearrange(x, "b t c h w -> (b t) c h w")
+
         x = self.patch_embedder(x)
         x = rearrange(x, "(b t) p c -> b (t p) c", b=input_batch_size)
 

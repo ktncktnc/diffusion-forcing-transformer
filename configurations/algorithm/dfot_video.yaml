@@ -3,6 +3,7 @@
 
 defaults:
   - base_pytorch_algo
+  # - backbone: dit3d_factorized_matrix
   - backbone: dit3d
 
 # dataset-dependent configurations

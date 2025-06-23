@@ -1,0 +1,28 @@
+defaults:
+  - base_pytorch_algo
+  
+name: dc_ae_preprocessor
+attention_head_dim: 32
+decoder_act_fns: [relu, relu, relu, silu, silu]
+decoder_block_out_channels: [128, 256, 512, 512, 1024]
+decoder_block_types: [ResBlock, ResBlock, ResBlock, EfficientViTBlock, EfficientViTBlock]
+decoder_layers_per_block: [0, 5, 10, 2, 2]
+decoder_norm_types: [batch_norm, batch_norm, batch_norm, rms_norm, rms_norm]
+decoder_qkv_multiscales: [[], [], [], [], []]
+downsample_block_type: pixel_unshuffle
+encoder_block_out_channels: [128, 256, 512, 512, 1024]
+encoder_block_types: [ResBlock, ResBlock, ResBlock, EfficientViTBlock, EfficientViTBlock]
+encoder_layers_per_block: [0, 4, 8, 2, 2]
+encoder_qkv_multiscales: [[], [], [], [], []]
+in_channels: 3
+latent_channels: 32
+scaling_factor: 0.2889
+upsample_block_type: pixel_shuffle
+pretrained_path: null
+pretrained_kwargs: {}
+precision: ${experiment.validation.precision}
+latent_type: ${dataset.latent.type}
+max_encode_length: 700 # number of frames that can be passed through the encoder at once
+logging:
+  max_video_length: 30
+  every_n_batch: 10

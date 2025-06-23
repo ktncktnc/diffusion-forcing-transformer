@@ -1,0 +1,12 @@
+name: dit3d 
+variant: full_matrix_attention 
+pos_emb_type: rope_1d
+patch_size: 2
+hidden_size: 384
+embed_col_dim: 512
+embed_row_dim: 512
+num_col_heads: 4
+num_row_heads: 4
+depth: 12
+mlp_ratio: 4.0
+use_gradient_checkpointing: True
