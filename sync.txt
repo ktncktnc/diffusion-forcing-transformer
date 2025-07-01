@@ -128,3 +128,24 @@ python -m main +name=uniform_reference_dfot_cond_ucf_101_4_to_16 dataset=cond_uc
 ### DFoT-random_independent
 
 python -m main +name=EVAL_DFOT_BAIR_16 dataset=bair algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/bair/dfot_video/2025-06-18/16-18-21/checkpoints/epoch\=7-step\=150000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.max_frames=16 experiment.validation.batch_size=32 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled
+
+
+
+
+
+
+
+python -m main +name=EVAL_DFOT_DMLAB_16_RI dataset=dmlab algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-06-09/14-53-28/checkpoints/epoch\=0-step\=500000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled algorithm.scheduling_matrix=interleaved
+
+
+
+python -m main +name=EVAL_DFOT_DMLAB_16_RI dataset=dmlab algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-06-23/13-08-14/checkpoints/epoch\=1-step\=500000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=0 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=8 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=1 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled algorithm.scheduling_matrix=interleaved
+
+
+
+
+
+
+
+
+python -m main +name=EVAL_DFOT_DMLAB_16_RU dataset=dmlab algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-06-09/14-53-28/checkpoints/epoch\=0-step\=500000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=4 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=1 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled algorithm.diffusion.sampling_timesteps=25
