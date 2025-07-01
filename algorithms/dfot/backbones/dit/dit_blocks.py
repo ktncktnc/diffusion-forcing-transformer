@@ -134,7 +134,6 @@ class MatrixAttention(nn.Module):
     This is a simplified version of the attention block that does not use RoPE.
     It is used in the DiT model for the final layer.
     """
-
     def __init__(
         self, 
         col_dim: int,
@@ -156,8 +155,8 @@ class MatrixAttention(nn.Module):
         self.row_dim = row_dim
         self.embed_col_dim = embed_col_dim if embed_col_dim is not None else col_dim
         self.embed_row_dim = embed_row_dim if embed_row_dim is not None else row_dim
-        self.num_row_heads = num_row_heads
         self.num_col_heads = num_col_heads
+        self.num_row_heads = num_row_heads
         self.num_heads = num_col_heads * num_row_heads
         assert self.embed_col_dim % num_col_heads == 0, "embed_col_dim must be divisible by num_col_heads"
         assert self.embed_row_dim % num_row_heads == 0, "embed_row_dim must be divisible by num_row_heads"
@@ -165,16 +164,15 @@ class MatrixAttention(nn.Module):
         self.head_row_dim = self.embed_row_dim // num_row_heads
         self.scale = (self.head_col_dim*self.head_row_dim)**-0.5
 
-        self.qkv_u = nn.Parameter(torch.zeros(col_dim, self.embed_col_dim))
-        self.qkv_v = nn.Parameter(torch.zeros(row_dim, self.embed_row_dim*3))
-        self.q_norm = norm_layer(self.head_col_dim) if qk_norm else nn.Identity()
-        self.k_norm = norm_layer(self.head_row_dim) if qk_norm else nn.Identity()
+        self.qkv_u = nn.Parameter(torch.rand(col_dim, self.embed_col_dim))
+        self.qkv_v = nn.Parameter(torch.rand(row_dim, self.embed_row_dim*3))
+        self.q_norm = norm_layer([self.head_col_dim, self.head_row_dim]) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer([self.head_col_dim, self.head_row_dim]) if qk_norm else nn.Identity()
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj_u = nn.Parameter(torch.zeros(self.embed_col_dim, col_dim))
-        self.proj_v = nn.Parameter(torch.zeros(self.embed_row_dim, row_dim))
+        self.proj_u = nn.Parameter(torch.rand(self.embed_col_dim, col_dim))
+        self.proj_v = nn.Parameter(torch.rand(self.embed_row_dim, row_dim))
         self.proj_drop = nn.Dropout(proj_drop)
         self.rope = rope
-
 
     def forward(
         self, 
@@ -186,8 +184,8 @@ class MatrixAttention(nn.Module):
         B, L, H, W = x.shape
         qkv = (
             matrix_mul(x, self.qkv_u, self.qkv_v) # BLH*3,W
-            .reshape(B, L, 3, self.num_heads, self.head_col_dim, self.head_row_dim)
-            .permute(2, 0, 3, 1, 4, 5)
+            .reshape(B, L, 3, self.num_col_heads, self.head_col_dim, self.num_row_heads, self.head_row_dim)
+            .permute(2, 0, 3, 5, 1, 4, 6)
         )
         q, k, v = qkv.unbind(0) # batch_size, n_heads, n_tokens, height, width
         q, k = self.q_norm(q), self.k_norm(k) 
@@ -199,11 +197,11 @@ class MatrixAttention(nn.Module):
         #     q = self.rope(q.flatten(-2,-1)).reshape(B, self.num_heads, L, self.head_col_dim, self.head_row_dim)
         #     k = self.rope(k.flatten(-2,-1)).reshape(B, self.num_heads, L, self.head_col_dim, self.head_row_dim)
 
-        attn_map = torch.einsum('bnihw,bnjhw->bnij', q, k)  # (B, num_heads, N, N)
+        attn_map = torch.einsum('bmnihw,bmnjhw->bmnij', q, k)  # (B, num_heads, N, N)
         attn_map = (attn_map/self.scale).softmax(dim=-1)  # shape: (B, num_heads, N, N)
 
-        x = torch.einsum('bnij,bnjhw->bnihw', self.attn_drop(attn_map), v) # (B, num_heads, num_tokens, H, W)
-        x = x.permute(0, 2, 1, 3, 4)  # (B, N, num_heads, H, W)
+        x = torch.einsum('bmnij,bmnjhw->bmnihw', self.attn_drop(attn_map), v) # (B, col_num_head, row_num_head, num_tokens, H, W)
+        x = x.permute(0, 3, 1, 4, 2, 5)  # (B, N, num_heads, H, W)
         x = x.reshape(B, L, self.num_col_heads * self.head_col_dim, self.num_row_heads * self.head_row_dim)
         x = matrix_mul(x, self.proj_u, self.proj_v)  # (B, N, C)
         x = self.proj_drop(x)
@@ -475,14 +473,14 @@ class MatrixDiTBlock(nn.Module):
 
 if __name__ == "__main__":
     # Test matrix DiT block
-    batch_size, n_frames, n_tokens, token_dim = 5, 16, 1024*16, 768
+    batch_size, n_frames, n_tokens, token_dim = 5, 16, 16*16, 768
     from algorithms.dfot.backbones.modules.embeddings import RotaryEmbedding1D
     
     rope = RotaryEmbedding1D(
         128*128, 16
     )
     block = MatrixDiTBlock(
-        col_hidden_size=1024,
+        col_hidden_size=n_frames,
         row_hidden_size=token_dim,
         num_col_heads=4,
         num_row_heads=4,
@@ -497,6 +495,68 @@ if __name__ == "__main__":
     out = block(
         x,
         c=torch.randn(batch_size, n_tokens, token_dim),
-        # t=torch.randint(0, 1000, (batch_size, n_frames))
+        t=torch.randint(0, 1000, (batch_size, n_frames))
     )
     print("Output shape:", out.shape)  # Should be (batch_size, n_tokens, token_dim)
+    print('output isnan:', torch.isnan(out).any().item())
+    # NLP Example
+    
+    # x = torch.arange(1, 97).reshape(1, 2, 8, 6) # B=2, T=2, D=8 
+    # # col_head: 2
+    # # row_head: 3
+    # print(x)
+    # # x = x.reshape(1, 2, 2, 4, 6).permute(0, 2, 1, 3, 4) # (B, num_heads, N, H_e, W),  (1, 2, 2, 4, 6)
+    # # x = x.reshape(1, 2, 2, 4, 3, 2).permute(0, 1, 4, 2, 3, 5)
+    # x = x.reshape(1, 2, 2, 4, 3, 2).permute(0, 2, 4, 1, 3, 5)
+
+    # print(x) # (1, 2, 3, 2, 4, 2) # (B, H_num_heads, W_num_heads, N, H_e, W), 
+    # # print(x.shape)
+
+
+    # x = x.permute(0, 3, 1, 4, 2, 5) # (B, N, H_num_heads, H_e, W_num_heads, W_e)
+    # x = x.reshape(1, 2, 8, 6)
+    # print(x)
+
+    # # B, N, C = x.shape # (B, N, C)
+    # # qkv = qkv(x).reshape(B, N, 3, num_heads, C // num_heads).permute(2, 0, 3, 1, 4).contiguous() # (B, N, 3, H, D)
+    # # q, k, v = qkv.unbind(0)   # make torchscript happy (cannot use tensor as tuple) # (B, H, N, D)
+        
+    # qkv = (
+    #     matrix_mul(x, self.qkv_u, self.qkv_v) # BLH*3,W
+    #     .reshape(B, L, 3, self.num_col_heads, self.head_col_dim, self.num_row_heads, self.head_row_dim)
+    #     .permute(2, 0, 3, 5, 1, 4, 6)
+    # )
+    #q, k, v = qkv.unbind(0) # batch_size, n_heads, n_tokens, height, width
+    # q, k = self.q_norm(q), self.k_norm(k) 
+
+    # # Currently, only support RoPE1D, add positional embeddings for each frame.
+    # # I think the matrix is already support position of height, width inside a frame.
+    # # TODO: check if this is correct.
+    # # if self.rope is not None:
+    # #     q = self.rope(q.flatten(-2,-1)).reshape(B, self.num_heads, L, self.head_col_dim, self.head_row_dim)
+    # #     k = self.rope(k.flatten(-2,-1)).reshape(B, self.num_heads, L, self.head_col_dim, self.head_row_dim)
+
+    # attn_map = torch.einsum('bmnihw,bmnjhw->bmnij', q, k)  # (B, num_heads, N, N)
+    # attn_map = (attn_map/self.scale).softmax(dim=-1)  # shape: (B, num_heads, N, N)
+
+    # x = torch.einsum('bmnij,bmnjhw->bmnihw', self.attn_drop(attn_map), v) # (B, col_num_head, row_num_head, num_tokens, H, W)
+    # x = x.permute(0, 3, 1, 4, 2, 5)  # (B, N, num_heads, H, W)
+    # x = x.reshape(B, L, self.num_col_heads * self.head_col_dim, self.num_row_heads * self.head_row_dim)
+
+    # B, L, H, W = 1, 3, 8, 6
+    # n_H, n_W = 2, 3  # Number of heads in height and width dimensions
+    # X = (torch.arange(1, 3*B*L*H*W+1) 
+    # .reshape(B, L, 3, n_H, H//n_H, n_W, W//n_W)  # (B, L, H, W)
+    # .permute(2, 0, 3, 5, 1, 4, 6)  # (H, B, n_H, n_W, L, H_e, W_e)
+    # )
+    # q,k,v = X.unbind(0)  # (B, n_H, n_W, L, H_e, W_e)
+
+    # print(v)
+
+    # v = v.permute(0, 3, 1, 4, 2, 5)  # (B, L, n_H, H_e, n_W, W_e)
+    # v = v.reshape(B, L, H, W)
+    # print(v)
+
+
+
+    

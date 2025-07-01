@@ -112,6 +112,7 @@ class BaseDataModule(pl.LightningDataModule):
         Returns:
             EVAL_DATALOADERS: A list of validation dataloaders.
         """
+        return self._dataloader("validation")
         dataloaders = {}
 
         context = self.root_cfg.algorithm.context_frames > 0

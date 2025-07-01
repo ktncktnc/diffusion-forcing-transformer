@@ -114,10 +114,10 @@ class BaseLightningExperiment(BaseExperiment):
         pprint.pp(OmegaConf.to_yaml(self.root_cfg))
         self.data_module = self.data_module_cls(root_cfg, self.compatible_datasets)
 
-    def _build_common_callbacks(self):
+    def _build_common_callbacks(self, is_training: bool = True):
         return [
             EMA(**self.cfg.ema),
-            TQDMProgressBar(refresh_rate=200)
+            TQDMProgressBar(refresh_rate=100 if is_training else 1),
         ]
 
     def training(self) -> None:
@@ -151,6 +151,7 @@ class BaseLightningExperiment(BaseExperiment):
             logger=self.logger,
             devices=1,
             num_nodes=self.cfg.num_nodes,
+            detect_anomaly=self.cfg.detect_anomaly,
             # strategy=(
             #     DDPStrategy(find_unused_parameters=self.cfg.find_unused_parameters)
             #     if torch.cuda.device_count() > 1
@@ -164,7 +165,7 @@ class BaseLightningExperiment(BaseExperiment):
             check_val_every_n_epoch=self.cfg.validation.val_every_n_epoch,
             accumulate_grad_batches=self.cfg.training.optim.accumulate_grad_batches,
             precision=self.cfg.training.precision,
-            detect_anomaly=False,  # self.cfg.debug,
+            # detect_anomaly=False,  # self.cfg.debug,
             num_sanity_val_steps=(
                 int(self.cfg.debug)
                 if self.cfg.validation.num_sanity_val_steps is None
@@ -205,7 +206,7 @@ class BaseLightningExperiment(BaseExperiment):
         if self.cfg.validation.compile:
             self.algo = torch.compile(self.algo)
 
-        callbacks = [] + self._build_common_callbacks()
+        callbacks = [] + self._build_common_callbacks(False)
 
         trainer = pl.Trainer(
             accelerator="auto",
@@ -242,7 +243,7 @@ class BaseLightningExperiment(BaseExperiment):
         if self.cfg.test.compile:
             self.algo = torch.compile(self.algo)
 
-        callbacks = [] + self._build_common_callbacks()
+        callbacks = [] + self._build_common_callbacks(False)
 
         trainer = pl.Trainer(
             accelerator="auto",

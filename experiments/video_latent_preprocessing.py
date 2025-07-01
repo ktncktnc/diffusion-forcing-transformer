@@ -2,9 +2,10 @@ from datasets.video import (
     MinecraftSimpleVideoDataset,
     UCF101SimpleVideoDataset,
     DMLabSimpleVideoDataset,
-    BAIRSimpleVideoDataset
+    BAIRSimpleVideoDataset,
+    TaichiSimpleVideoDataset
 )
-from algorithms.vae import ImageVAEPreprocessor, DCAEPreprocessor, AutoencoderKL, AutoencoderKLPreprocessor
+from algorithms.vae import ImageVAEPreprocessor, DCAEPreprocessor, AutoencoderKL, AutoencoderKLPreprocessor, Titok_KLPreprocessor
 from .base_exp import BaseLightningExperiment
 from .data_modules import ValDataModule
 
@@ -17,14 +18,17 @@ class VideoLatentPreprocessingExperiment(BaseLightningExperiment):
     compatible_algorithms = dict(
         image_vae_preprocessor=ImageVAEPreprocessor,
         dc_ae_preprocessor=DCAEPreprocessor,
-        kl_autoencoder_preprocessor=AutoencoderKLPreprocessor
+        dc_ae_16x_preprocessor=DCAEPreprocessor,
+        kl_autoencoder_preprocessor=AutoencoderKLPreprocessor,
+        titok_kl_preprocessor=Titok_KLPreprocessor
     )
 
     compatible_datasets = dict(
         minecraft=MinecraftSimpleVideoDataset,
         ucf_101=UCF101SimpleVideoDataset,
         dmlab=DMLabSimpleVideoDataset,
-        bair=BAIRSimpleVideoDataset
+        bair=BAIRSimpleVideoDataset,
+        taichi=TaichiSimpleVideoDataset
     )
 
     data_module_cls = ValDataModule

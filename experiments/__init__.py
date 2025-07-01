@@ -7,12 +7,15 @@ from .base_exp import BaseExperiment
 from .video_generation import VideoGenerationExperiment
 from .video_latent_preprocessing import VideoLatentPreprocessingExperiment
 from .video_latent_learning import VideoLatentLearningExperiment
+from .simple_video_generation import SimpleVideoGenerationExperiment
 
 # each key has to be a yaml file under '[project_root]/configurations/experiment' without .yaml suffix
 exp_registry = dict(
-    video_generation=VideoGenerationExperiment,
+    # video_generation=VideoGenerationExperiment,
+    video_generation=SimpleVideoGenerationExperiment,
     video_latent_preprocessing=VideoLatentPreprocessingExperiment,
     video_latent_learning=VideoLatentLearningExperiment,
+
 )
 
 

@@ -20,7 +20,7 @@ from typing import List, Tuple
 
 
 class TaichiBaseVideoDataset(BaseVideoDataset):
-    _ALL_SPLITS = ["training", "test"]
+    _ALL_SPLITS = ["train", "test"]
 
     def download_dataset(self):
         pass
@@ -36,11 +36,7 @@ class TaichiBaseVideoDataset(BaseVideoDataset):
         }
         ```
         """
-        if split == "training":
-            split_name = 'train'
-        else:
-            split_name = 'test'
-        video_paths = sorted(list((self.save_dir / split_name).glob("*/")), key=str)
+        video_paths = sorted(list((self.save_dir / split).glob("*/")), key=str)
         video_paths = [str(path) for path in video_paths]
         video_lengths: List[int] = []
 
@@ -119,7 +115,9 @@ class TaichiSimpleVideoDataset(TaichiBaseVideoDataset, BaseSimpleVideoDataset):
     Taichi simple video dataset
     """
     def __init__(self, cfg: DictConfig, split: str = "training"):
-        if split == "validation":
+        if split == 'training':
+            split = 'train'
+        elif split == "validation":
             split = "test"
         BaseSimpleVideoDataset.__init__(self, cfg, split)
 

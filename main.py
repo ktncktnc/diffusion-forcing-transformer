@@ -75,16 +75,15 @@ def run_local(cfg: DictConfig):
     if cfg.wandb.mode != "disabled":
         # If resuming, merge into the existing run on wandb.
         resume = cfg.get("resume", None)
-        if resume and not requeue_is_existing_run:
-            name = None
+        # if resume and not requeue_is_existing_run:
+        #     name = None
+        # else:
+        if "dfot" in cfg.algorithm._name:
+            name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name}/{cfg.algorithm.backbone.name}/{cfg.algorithm.noise_level} ({output_dir.parent.name}/{output_dir.name})"
         else:
-            if "dfot" in cfg.algorithm._name:
-                name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name}/{cfg.algorithm.backbone.name}/{cfg.algorithm.noise_level} ({output_dir.parent.name}/{output_dir.name})"
-            # elif cfg.algorithm._name.startswith("gibbs_dfot"):
-            #     name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name}/{cfg.algorithm.backbone.name}/{cfg.algorithm.noise_level}_{str(cfg.algorithm.backbone.gibbs.mask_type)} ({output_dir.parent.name}/{output_dir.name})"
-            else:
-                name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name} ({output_dir.parent.name}/{output_dir.name})"
+            name = f"{cfg.name}/{cfg.experiment.tasks[0]}: {cfg.experiment._name}/{cfg.dataset._name}/{cfg.algorithm._name} ({output_dir.parent.name}/{output_dir.name})"
 
+        print("name", name)
         if "_on_compute_node" in cfg and cfg.cluster.is_compute_node_offline:
             logger_cls = OfflineWandbLogger
         else:
@@ -118,7 +117,7 @@ def run_local(cfg: DictConfig):
             offline=offline,
             log_model="all" if not offline else False,
             config=OmegaConf.to_container(cfg),
-            id=resume or requeue,
+            # id=resume or requeue,
             tags=tags,
             **wandb_kwargs,
         )
@@ -141,17 +140,17 @@ def run_local(cfg: DictConfig):
     checkpoint_path = None
     load_id = None
     if resume:
-        load_id = resume
+        checkpoint_path = resume
     elif load:
         load_id = parse_load(load)[0]
         if load_id is None:
             checkpoint_path = load
 
-    if load_id:
-        run_path = f"{cfg.wandb.entity}/{cfg.wandb.project}/{load_id}"
-        checkpoint_path = wandb_to_local_path(run_path)
-    elif load and is_hf_path(load):
-        checkpoint_path = download_pretrained(load)
+    # if load_id:
+    #     run_path = f"{cfg.wandb.entity}/{cfg.wandb.project}/{load_id}"
+    #     checkpoint_path = wandb_to_local_path(run_path)
+    # elif load and is_hf_path(load):
+    #     checkpoint_path = download_pretrained(load)
 
     # launch experiment
     experiment = build_experiment(cfg, logger, checkpoint_path)
@@ -282,9 +281,9 @@ def run(cfg: DictConfig):
         option = "best" if option is None else option
 
     if not "skip_download" in cfg:
-        if load_id and "_on_compute_node" not in cfg:
-            run_path = f"{cfg.wandb.entity}/{cfg.wandb.project}/{load_id}"
-            download_checkpoint(run_path, Path(os.path.join(cfg.output_dir, 'downloaded')), option=option)
+        # if load_id and "_on_compute_node" not in cfg:
+        #     run_path = f"{cfg.wandb.entity}/{cfg.wandb.project}/{load_id}"
+        #     download_checkpoint(run_path, Path(os.path.join(cfg.output_dir, 'downloaded')), option=option)
         if "_on_compute_node" not in cfg and is_rank_zero:
             download_vae_checkpoints(cfg)
         if load and is_hf_path(load) and "_on_compute_node" not in cfg:

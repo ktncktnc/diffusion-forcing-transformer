@@ -55,6 +55,7 @@ class BaseVideoDataset(torch.utils.data.Dataset, ABC):
         if not self.metadata_dir.exists():
             self.metadata_dir.mkdir(exist_ok=True, parents=True)
             for split in self._ALL_SPLITS:
+                # print('split', split)
                 self.build_metadata(split)
 
         self.metadata = self.load_metadata()
