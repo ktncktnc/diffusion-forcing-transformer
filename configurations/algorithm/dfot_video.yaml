@@ -40,12 +40,12 @@ replacement: noisy_scale
 
 refinement_sampling:
   enabled: False
-  goback_length: 10
-  n_goback: 10
+  goback_length: 20
+  n_goback: 5
 
 save_attn_map:
   enabled: False
-  attn_map_dir: /scratch/s224075134/temporal_diffusion/diffusion-forcing-transformer/uncond_attn_map
+  attn_map_dir: /home/s224075134/diffusion-forcing-transformer/outputs/outputs/attn_maps/dfot_dmlab_full_sequence_context_noiselevel/non_context_interleaved
 
 diffusion:
   is_continuous: False

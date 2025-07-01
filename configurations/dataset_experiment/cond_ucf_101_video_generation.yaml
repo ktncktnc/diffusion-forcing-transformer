@@ -19,7 +19,7 @@ dataset:
 algorithm:
   num_sanity_val_steps: 1
   lr_scheduler:
-    num_warmup_steps: 10000
+    num_warmup_steps: 500
   weight_decay: 0
   backbone:
     patch_size: 2

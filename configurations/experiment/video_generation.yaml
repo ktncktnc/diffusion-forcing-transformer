@@ -13,7 +13,7 @@ ema:
     
 training:
   lr: 2e-4
-  precision: 16-mixed
+  precision: bf16
   batch_size: 16
   max_steps: -1
   max_epochs: 32

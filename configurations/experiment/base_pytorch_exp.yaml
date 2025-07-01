@@ -6,9 +6,10 @@ defaults:
 
 tasks: [training] # tasks to run sequantially, change when your project has multiple stages and you want to run only a subset of them.
 num_nodes: 1 # number of gpu servers used in large scale distributed training
+detect_anomaly: False
 
 training:
-  precision: 16-mixed # set float precision, 16-mixed is faster while 32 is more stable
+  precision: bf16 # set float precision, 16-mixed is faster while 32 is more stable
   compile: False # whether to compile the model with torch.compile
   lr: 0.001 # learning rate
   batch_size: 16 # training batch size; effective batch size is this number * gpu * nodes iff using distributed training
@@ -29,7 +30,7 @@ training:
     enable_version_counter: False # If this is ``False``, later checkpoint will be overwrite previous ones.
 
 validation:
-  precision: 16-mixed
+  precision: bf16
   compile: False # whether to compile the model with torch.compile
   batch_size: 16 # validation batch size per GPU; effective batch size is this number * gpu * nodes iff using distributed training
   val_every_n_step: 2000 # controls how frequent do we run validation, can be float (fraction of epoches) or int (steps) or null (if val_every_n_epoch is set)
@@ -42,7 +43,7 @@ validation:
   inference_mode: True
 
 test:
-  precision: 16-mixed
+  precision: bf16
   compile: False # whether to compile the model with torch.compile
   batch_size: 16 # test batch size per GPU; effective batch size is this number * gpu * nodes iff using distributed training
   limit_batch: null # if null, run through test set. Otherwise limit the number of batches to use for test.

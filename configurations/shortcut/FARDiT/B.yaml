@@ -1,0 +1,7 @@
+algorithm:
+  backbone:
+    hidden_size: 768
+    num_heads: 12
+    depth: 12
+    axes_dims_rope: [16, 24, 24]
+    slope_scale: 0.0
