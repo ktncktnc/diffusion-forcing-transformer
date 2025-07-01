@@ -333,7 +333,7 @@ class DFoTVideo(BaseVideoAlgo):
                         n_goback=self.cfg.refinement_sampling.n_goback,
                         context_mask=current_context_mask_chunk.long(),
                         conditions=current_conditions_chunk,
-                        # history_guidance=history_guidance,
+                        history_guidance=history_guidance,
                         pbar=pbar,
                     )
                 else:
@@ -647,6 +647,7 @@ class DFoTVideo(BaseVideoAlgo):
                     n_goback=self.cfg.refinement_sampling.n_goback,
                     guidance_fn=guidance_fn,
                     reconstruction_guidance=reconstruction_guidance,
+                    history_guidance=history_guidance,
                     return_all=return_all,
                     pbar=pbar,
                 )
@@ -926,7 +927,7 @@ class DFoTVideo(BaseVideoAlgo):
         conditions: Optional[torch.Tensor] = None,
         guidance_fn: Optional[Callable] = None,
         reconstruction_guidance: float = 0.0,
-        # history_guidance: Optional[HistoryGuidance] = None,
+        history_guidance: Optional[HistoryGuidance] = None,
         return_all: bool = False,
         pbar: Optional[tqdm] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
@@ -1021,8 +1022,14 @@ class DFoTVideo(BaseVideoAlgo):
             context = torch.cat([context, context_pad], 1)
             context_mask = torch.cat([context_mask, context_mask_pad], 1)
 
+        if history_guidance is None:
+            # by default, use conditional sampling
+            history_guidance = HistoryGuidance.conditional(
+                timesteps=self.timesteps,
+            )
+
         # replace xs_pred's context frames with context
-        # xs_pred = torch.where(self._extend_x_dim(context_mask) >= 1, context, xs_pred)
+        xs_pred = torch.where(self._extend_x_dim(context_mask) >= 1, context, xs_pred)
 
         # generate scheduling matrix
         scheduling_matrix = self._generate_refine_scheduling_matrix(
@@ -1031,18 +1038,11 @@ class DFoTVideo(BaseVideoAlgo):
             n_goback=n_goback,
             padding=padding,
         )
-        # xs_pred = torch.where(self._extend_x_dim(context_mask) >= 1, context, xs_pred)
-        # torch.set_printoptions(threshold=100000000, linewidth=10000)
-        # print('\n')
-        # print(scheduling_matrix)
-        # exit(0)
         scheduling_matrix = scheduling_matrix.to(self.device)
         scheduling_matrix = repeat(scheduling_matrix, "m t -> m b t", b=batch_size)
-
-        # if not self.is_full_sequence:
-        #     scheduling_matrix = torch.where(
-        #         context_mask[None] >= 1, -1, scheduling_matrix
-        #     )
+        scheduling_matrix = torch.where(
+            context_mask[None] >= 1, -1, scheduling_matrix
+        )
         
         record = [] if return_all else None
 
@@ -1057,57 +1057,97 @@ class DFoTVideo(BaseVideoAlgo):
         for m in range(scheduling_matrix.shape[0] - 1):
             from_noise_levels = scheduling_matrix[m]
             to_noise_levels = scheduling_matrix[m+1]
-            
-            # context_mask = torch.where(
-            #     torch.logical_and(context_mask == 0, from_noise_levels == -1),
-            #     2,
-            #     context_mask,
-            # )
-            
-            # Reverse process: x_tm1 ~ p(x_tm1|x_t)
-            # TODO: replace x_tm1 = context_mask * x^c_tm1 + (1-context_mask) * x^g_tm1 
-            if from_noise_levels[0,0].item() > to_noise_levels[0,0].item():
-                # print(from_noise_levels, to_noise_levels)
+
+            if from_noise_levels[0,-1].item() > to_noise_levels[0,-1].item():
+                # update context mask by changing 0 -> 2 for fully generated tokens
+                context_mask = torch.where(
+                    torch.logical_and(context_mask == 0, from_noise_levels == -1),
+                    2,
+                    context_mask,
+                )
+
                 # create a backup with all context tokens unmodified
                 xs_pred_prev = xs_pred.clone()
                 if return_all:
                     record.append(xs_pred.clone())
 
                 conditions_mask = None
-                # update xs_pred by DDIM or DDPM sampling
-                xs_pred = self.diffusion_model.sample_step(
-                    xs_pred,
-                    from_noise_levels,
-                    to_noise_levels,
-                    self._process_conditions(
-                        (
-                            repeat(
-                                conditions,
-                                "b ... -> (b nfe) ...",
-                                nfe=1,
-                            ).clone()
-                            if conditions is not None
-                            else None
-                        ),
+                with history_guidance(context_mask) as history_guidance_manager:
+                    nfe = history_guidance_manager.nfe
+                    pbar.set_postfix(NFE=nfe)
+                    xs_pred, from_noise_levels, to_noise_levels, conditions_mask = (
+                        history_guidance_manager.prepare(
+                            xs_pred,
+                            from_noise_levels,
+                            to_noise_levels,
+                            replacement_fn=self.diffusion_model.q_sample,
+                            replacement_only=self.is_full_sequence,
+                        )
+                    )
+
+                    if reconstruction_guidance > 0:
+
+                        def composed_guidance_fn(
+                            xk: torch.Tensor,
+                            pred_x0: torch.Tensor,
+                            alpha_cumprod: torch.Tensor,
+                        ) -> torch.Tensor:
+                            loss = (
+                                F.mse_loss(pred_x0, context, reduction="none")
+                                * alpha_cumprod.sqrt()
+                            )
+                            _context_mask = rearrange(
+                                context_mask.bool(),
+                                "b t -> b t" + " 1" * len(x_shape),
+                            )
+                            # scale inversely proportional to the number of context frames
+                            loss = torch.sum(
+                                loss
+                                * _context_mask
+                                / _context_mask.sum(dim=1, keepdim=True).clamp(min=1),
+                            )
+                            likelihood = -reconstruction_guidance * 0.5 * loss
+                            return likelihood
+
+                    else:
+                        composed_guidance_fn = guidance_fn
+
+                    # update xs_pred by DDIM or DDPM sampling
+                    xs_pred = self.diffusion_model.sample_step(
+                        xs_pred,
                         from_noise_levels,
-                    ),
-                    conditions_mask,
-                    guidance_fn=guidance_fn,
-                )
-                xc_t = self.diffusion_model.q_sample(context, to_noise_levels)
+                        to_noise_levels,
+                        self._process_conditions(
+                            (
+                                repeat(
+                                    conditions,
+                                    "b ... -> (b nfe) ...",
+                                    nfe=nfe,
+                                ).clone()
+                                if conditions is not None
+                                else None
+                            ),
+                            from_noise_levels,
+                        ),
+                        conditions_mask,
+                        guidance_fn=composed_guidance_fn,
+                    )
+                    xs_pred = history_guidance_manager.compose(xs_pred)
+                    xc_t = self.diffusion_model.q_sample(context, to_noise_levels)
+                    xs_pred = torch.where(
+                        self._extend_x_dim(context_mask) == 0, xs_pred, xc_t
+                    )
+                # only replace the tokens being generated (revert context tokens)
                 xs_pred = torch.where(
-                    self._extend_x_dim(context_mask) == 0, xs_pred, xc_t
+                    self._extend_x_dim(context_mask) == 0, xs_pred, xs_pred_prev
                 )
-            
-            # Forward process: x_t ~ p(x_t|x_tm1)
+                pbar.update(1)
             else:
                 xs_pred = self.diffusion_model.q_sample_from_x_k(
                     xs_pred,
                     from_noise_levels,
                     to_noise_levels
                 )
-        
-        pbar.update(1)
 
         if return_all:
             record.append(xs_pred.clone())
