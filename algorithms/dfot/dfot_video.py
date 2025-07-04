@@ -52,15 +52,19 @@ class DFoTVideo(BaseVideoAlgo):
         )
         loss = self._reweight_loss(loss, masks)
 
-        if batch_idx % self.cfg.logging.loss_freq == 0:
-            self.log(
-                f"{namespace}/loss",
-                loss,
-                on_step=namespace == "training",
-                on_epoch=namespace != "training",
-                sync_dist=True,
-                add_dataloader_idx=False
-            )
+        # if attached to trainer => log
+        try:
+            if batch_idx % self.cfg.logging.loss_freq == 0:
+                self.log(
+                    f"{namespace}/loss",
+                    loss,
+                    on_step=namespace == "training",
+                    on_epoch=namespace != "training",
+                    sync_dist=True,
+                    add_dataloader_idx=False
+                )
+        except AttributeError:
+            pass
 
         xs, xs_pred = map(self._unnormalize_x, (xs, xs_pred))
 

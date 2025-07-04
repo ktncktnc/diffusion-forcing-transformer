@@ -260,8 +260,8 @@ class BasePytorchAlgo(pl.LightningModule, ABC):
             batch_dim: the batch dimension of the original tensor
         """
         # if not ddp, skip gathering and return the original data
-        if self.trainer.world_size == 1:
-            return apply_to_collection(data, torch.Tensor, lambda x: x.to(self.device))
+        # if self.trainer.world_size == 1:
+        return apply_to_collection(data, torch.Tensor, lambda x: x.to(self.device))
 
         # synchronize before gathering
         torch.distributed.barrier()

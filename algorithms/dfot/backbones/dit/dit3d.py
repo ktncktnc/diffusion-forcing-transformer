@@ -68,6 +68,7 @@ class DiT3D(BaseBackbone):
             embed_row_dim=cfg.get("embed_row_dim", None),
             num_col_heads=cfg.get("num_col_heads", None),
             num_row_heads=cfg.get("num_row_heads", None),
+            matrix_block=cfg.get("matrix_block", None),
         )
         self.initialize_weights()
 

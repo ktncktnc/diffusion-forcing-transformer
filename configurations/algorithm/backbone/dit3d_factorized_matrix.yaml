@@ -1,13 +1,13 @@
 name: dit3d 
-variant: factorized_matrix_attention 
-pos_emb_type: sinusoidal_factorized # for spatial embedding, already add rope1d to matrix attention.
+variant: factorized_matrix_attention
+pos_emb_type: sinusoidal_2d # for spatial embedding, already add rope1d to matrix attention.
 patch_size: 2
 hidden_size: 384
-embed_col_dim: 128
+embed_col_dim: 1
 embed_row_dim: 512
-num_heads: 16
-num_col_heads: 4
-num_row_heads: 4
+num_heads: 12 # spatial heads
+num_col_heads: 1
+num_row_heads: 8
 depth: 12
 mlp_ratio: 4.0
 use_gradient_checkpointing: True
