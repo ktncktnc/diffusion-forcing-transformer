@@ -190,10 +190,12 @@ class RotaryEmbeddingND(nn.Module):
         self.register_buffer("freqs", all_freqs, persistent=False)
 
     def get_freqs(self, dim: int, seq_len: int) -> torch.Tensor:
+        # Freq for dimensions: it increase freq by dimensions
         freqs = 1.0 / (
             self.theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
         )
         pos = torch.arange(seq_len, dtype=freqs.dtype)
+        # Outer product: get freqs along seq_length
         freqs = einsum("..., f -> ... f", pos, freqs)
         freqs = repeat(freqs, "... n -> ... (n r)", r=2)
         return freqs

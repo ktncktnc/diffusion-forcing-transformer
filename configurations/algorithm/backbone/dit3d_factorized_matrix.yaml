@@ -10,4 +10,5 @@ num_col_heads: 1
 num_row_heads: 8
 depth: 12
 mlp_ratio: 4.0
+matrix_block: matrix
 use_gradient_checkpointing: True

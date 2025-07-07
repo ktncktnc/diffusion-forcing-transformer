@@ -252,8 +252,9 @@ class DiTBase(nn.Module):
                     )
         
         if self.is_matrix_attention:
+            # NOTE: RoPE will be added for each row of the matrix independently. Doing this makes sure every row has its own frequencies. If we flatten the row and column, frequencies will be smaller by row.
             self.temporal_rope = RotaryEmbedding1D(
-                    dim=self.matrix_dim,
+                    dim=self.embed_row_dim // self.num_row_heads,
                     seq_len=self.max_temporal_length
                 )
     

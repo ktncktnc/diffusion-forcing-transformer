@@ -265,26 +265,28 @@ class MatrixAttention(nn.Module):
         height: int = None,
         width: int = None
     ) -> torch.Tensor:
-        B, L, H, W = x.shape
-        qkv = (
-            matrix_mul(x, self.qkv_u, self.qkv_v) # BLH*3,W
-            .reshape(B, L, 3, self.num_col_heads, self.head_col_dim, self.num_row_heads, self.head_row_dim)
-            .permute(2, 0, 3, 5, 1, 4, 6) # (3. B, num_col_heads, num_row_heads, N, H_e, W_e)
-        )
+        B, L, N, D = x.shape
+        qkv = matrix_mul(x, self.qkv_u, self.qkv_v) # BLH*3,W
+        qkv = rearrange(qkv, 'b l (c n) (k r d) -> k b c r l n d', b=B, l=L, c=self.num_col_heads, n=self.head_col_dim, k=3, r=self.num_row_heads, d=self.head_row_dim)
         q, k, v = qkv.unbind(0) # batch_size, num_col_heads, num_row_heads, n_tokens, height, width
         q, k = self.q_norm(q), self.k_norm(k) 
 
         # Currently, only support RoPE1D, add positional embeddings for each frame.
         if self.rope is not None:
-            q = self.rope(q.flatten(-2,-1)).reshape(B, self.num_col_heads, self.num_row_heads, L, self.head_col_dim, self.head_row_dim)
-            k = self.rope(k.flatten(-2,-1)).reshape(B, self.num_col_heads, self.num_row_heads, L, self.head_col_dim, self.head_row_dim)
+            #TODO: check if we should flatten the last two dimensions when using RoPE1D since RoPE1D adds different frequencies for each dimension.
+            #------------------
+            # => duplicate RoPE or shift smally? 
+            # 1 2 3 4
+            # 1 2 3 4
+            q = rearrange(self.rope(rearrange(q, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
+            k = rearrange(self.rope(rearrange(k, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
 
-        attn_map = torch.einsum('bmnihw,bmnjhw->bmnij', q, k)  # (B, num_heads, N, N)
+        attn_map = torch.einsum('bcrlnd,bcrknd->bcrlk', q, k)  # (B, num_heads, N, N)
         attn_map = (attn_map/self.scale).softmax(dim=-1)  # shape: (B, num_heads, N, N)
 
-        x = torch.einsum('bmnij,bmnjhw->bmnihw', self.attn_drop(attn_map), v) # (B, col_num_head, row_num_head, num_tokens, H, W)
-        x = x.permute(0, 3, 1, 4, 2, 5)  # (B, N, num_heads, H, W)
-        x = x.reshape(B, L, self.num_col_heads * self.head_col_dim, self.num_row_heads * self.head_row_dim)
+        x = torch.einsum('bcrlk,bcrknd->bcrlnd', self.attn_drop(attn_map), v) # (B, col_num_head, row_num_head, num_tokens, H, W)
+        x = rearrange(x, 'b c r l n d -> b l (c n) (r d)')  # (B, L, num_col_heads * head_col_dim, num_row_heads * head_row_dim)
+
         x = matrix_mul(x, self.proj_u, self.proj_v)  # (B, N, C)
         x = self.proj_drop(x)
         if hasattr(self, "store_attn_map"):
@@ -498,7 +500,7 @@ class MatrixDiTBlock(nn.Module):
             num_col_heads=num_col_heads,
             num_row_heads=num_row_heads,
             rope=matrix_rope, 
-            **block_kwargs
+            #**block_kwargs
         )
         self.use_mlp = mlp_ratio is not None
         if self.use_mlp:

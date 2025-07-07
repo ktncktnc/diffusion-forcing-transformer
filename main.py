@@ -35,6 +35,7 @@ from utils.cluster_utils import submit_slurm_job
 from utils.distributed_utils import rank_zero_print, is_rank_zero
 from utils.hydra_utils import unwrap_shortcuts
 
+org_argv = None  # This will be set in the run function.
 
 def run_local(cfg: DictConfig):
     # delay some imports in case they are not needed in non-local envs for submission
@@ -158,7 +159,7 @@ def run_local(cfg: DictConfig):
         experiment.exec_task(task)
 
 
-def run_slurm(cfg: DictConfig):
+def run_slurm(cfg: DictConfig, org_argv):
     python_args = (
         " ".join(
             [
@@ -172,6 +173,18 @@ def run_slurm(cfg: DictConfig):
         )
         + " +_on_compute_node=True"
     )
+    org_args = (
+        " ".join(
+            [
+                (
+                    f"'+requeue={generate_unexisting_run_id(cfg.wandb.entity, cfg.wandb.project)}'"
+                    if (arg.startswith("+requeue") and not is_run_id(arg.split("=")[1]))
+                    else f"'{arg}'"
+                )
+                for arg in org_argv[1:]
+            ]
+        )
+    )
 
     project_root = Path.cwd()
     while not (project_root / ".git").exists():
@@ -182,6 +195,7 @@ def run_slurm(cfg: DictConfig):
     slurm_log_dir = submit_slurm_job(
         cfg,
         python_args,
+        org_args,
         project_root,
     )
 
@@ -295,13 +309,19 @@ def run(cfg: DictConfig):
                 "Slurm detected, submitting to compute node instead of running locally..."
             )
         )
-        run_slurm(cfg)
+        run_slurm(cfg, org_argv)
     else:
         run_local(cfg)
 
+def set_org_argv(argv):
+    """
+    Set the global org_argv variable to the provided argv.
+    This is used to pass the original command line arguments to the run function.
+    """
+    global org_argv
+    org_argv = argv
 
 if __name__ == "__main__":
-    sys.argv = unwrap_shortcuts(
-        sys.argv, config_path="configurations", config_name="config"
-    )
+    set_org_argv(sys.argv.copy())
+    sys.argv = unwrap_shortcuts(sys.argv, config_path="configurations", config_name="config")
     run()  # pylint: disable=no-value-for-parameter

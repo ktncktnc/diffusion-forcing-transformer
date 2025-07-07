@@ -188,6 +188,7 @@ class SimpleVideoGenerationExperiment:
 
         start_time = time.time()
         rank_zero_print("********** Starting training... **********")
+        rank_zero_print("Configuration:", self.cfg)
         rank_zero_print("Model:", self.model)
         # Log parameters
         for p in params['trainable']:
