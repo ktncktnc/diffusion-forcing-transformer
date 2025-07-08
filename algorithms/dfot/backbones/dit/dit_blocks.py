@@ -91,8 +91,8 @@ class Attention(nn.Module):
             .reshape(B, N, 3, self.num_heads, self.head_dim)
             .permute(2, 0, 3, 1, 4) # (3, batch_size, num_heads, num_tokens, head_dim)
         )
-        q, k, v = qkv.unbind(0)
-        q, k = self.q_norm(q), self.k_norm(k)
+        q, k, v = qkv.unbind(0) # (batch_size, num_heads, num_tokens, head_dim)
+        q, k = self.q_norm(q), self.k_norm(k) 
         if self.rope is not None:
             q = self.rope(q)
             k = self.rope(k)
@@ -106,7 +106,7 @@ class Attention(nn.Module):
                 dropout_p=self.attn_drop.p if self.training else 0.0
             )
         else:
-            q = q * self.scale
+            q = q * self.scale # (batch_size, num_heads, num_tokens, head_dim)
             attn_map = q @ k.transpose(-2, -1)
             attn_map = attn_map.softmax(dim=-1) # shape: (B, num_heads, N, N)
             x = self.attn_drop(attn_map) @ v
@@ -265,6 +265,9 @@ class MatrixAttention(nn.Module):
         height: int = None,
         width: int = None
     ) -> torch.Tensor:
+        if hasattr(self, "store_attn_map"):
+            raise NotImplementedError("MatrixAttention does not support storing attention maps.")
+    
         B, L, N, D = x.shape
         qkv = matrix_mul(x, self.qkv_u, self.qkv_v) # BLH*3,W
         qkv = rearrange(qkv, 'b l (c n) (k r d) -> k b c r l n d', b=B, l=L, c=self.num_col_heads, n=self.head_col_dim, k=3, r=self.num_row_heads, d=self.head_row_dim)
@@ -281,16 +284,15 @@ class MatrixAttention(nn.Module):
             q = rearrange(self.rope(rearrange(q, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
             k = rearrange(self.rope(rearrange(k, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
 
-        attn_map = torch.einsum('bcrlnd,bcrknd->bcrlk', q, k)  # (B, num_heads, N, N)
-        attn_map = (attn_map/self.scale).softmax(dim=-1)  # shape: (B, num_heads, N, N)
+        q = q * self.scale  # (batch_size, num_col_heads, num_row_heads, n_tokens, height, width)
+        attn_map = torch.einsum('bcrlnd,bcrknd->bcrlk', q, k)  # (B, num_col_heads, num_row_heads, N, N)
+        attn_map = attn_map.softmax(dim=-1)  # shape: (B, num_col_heads, num_row_heads, N, N)
 
         x = torch.einsum('bcrlk,bcrknd->bcrlnd', self.attn_drop(attn_map), v) # (B, col_num_head, row_num_head, num_tokens, H, W)
         x = rearrange(x, 'b c r l n d -> b l (c n) (r d)')  # (B, L, num_col_heads * head_col_dim, num_row_heads * head_row_dim)
 
         x = matrix_mul(x, self.proj_u, self.proj_v)  # (B, N, C)
         x = self.proj_drop(x)
-        if hasattr(self, "store_attn_map"):
-            raise NotImplementedError("MatrixAttention does not support storing attention maps.")
 
         return x
 
