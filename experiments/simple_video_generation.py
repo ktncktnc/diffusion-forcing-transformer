@@ -284,8 +284,12 @@ class SimpleVideoGenerationExperiment:
         self.data_module.setup("validate")
         val_loader: DataLoader = self.data_module.val_dataloader()
 
+        optimizer_cfg: Optimizer = self.model.configure_optimizers()
+        lr_scheduler =  optimizer_cfg.pop("lr_scheduler", None)['scheduler']
+
         # accelerator
         accelerator = Accelerator(mixed_precision=self.cfg.experiment.training.precision)
+        accelerator.register_for_checkpointing(lr_scheduler)
         device = accelerator.device
 
         self.metrics = self._build_metrics(device=device)
@@ -295,16 +299,16 @@ class SimpleVideoGenerationExperiment:
         # check if EMA checkpoint exists
         if Path(os.path.join(self.ckpt_path, "ema.safetensors")).exists():
             self._build_ema_model()
-        self.resume_checkpoint(accelerator, self.ckpt_path)
+        self.resume_checkpoint(accelerator, self.ckpt_path, False)
         self._validate(val_loader, accelerator)
         
 
     def _validate(self, val_loader, accelerator, namespace='validation') -> None:
         # Load EMA if enabled
-        if self.ema:
-            self.model = accelerator.unwrap_model(self.model)
-            self.ema.store(self.model)
-            self.ema.copy_to(self.model)
+        # if self.ema:
+        #     self.model = accelerator.unwrap_model(self.model)
+        #     self.ema.store(self.model)
+        #     self.ema.copy_to(self.model)
 
         val_yielder = make_data_yielder(val_loader)
 
@@ -373,10 +377,10 @@ class SimpleVideoGenerationExperiment:
         self.model.train()
 
         # Restore EMA if it was used
-        if self.ema:
-            # Restore original model parameters
-            self.ema.restore(self.model)
-            self.model = accelerator.prepare(self.model)
+        # if self.ema:
+        #     # Restore original model parameters
+        #     self.ema.restore(self.model)
+        #     self.model = accelerator.prepare(self.model)
 
         rank_zero_print("********** Validation completed **********\n")
 
@@ -447,7 +451,7 @@ class SimpleVideoGenerationExperiment:
 
         self.num_logged_videos += batch_size
 
-    def resume_checkpoint(self, accelerator: Accelerator, ckpt_path: str) -> None:
+    def resume_checkpoint(self, accelerator: Accelerator, ckpt_path: str, load_model_only=False) -> None:
         if not ckpt_path or not Path(ckpt_path).exists():
             rank_zero_print("No checkpoint found. Starting from scratch.")
             return
@@ -464,17 +468,28 @@ class SimpleVideoGenerationExperiment:
             return state_dict['global_step']
         
         # TODO: fix weights_only for safer
-        accelerator.load_state(ckpt_path, load_kwargs={'weights_only': False})
-        global_step = int(os.path.basename(ckpt_path).split('_')[1].split('.')[0])
-        
-        if self.ema:
-            ema_save_path = os.path.join(ckpt_path, "ema.safetensors")
-            if Path(ema_save_path).exists():
-                rank_zero_print(f"Loading EMA state from {ema_save_path}")
-                self.ema.load_state_dict(load_file(ema_save_path))
-            else:
-                rank_zero_print(f"No EMA state found at {ema_save_path}. Skipping EMA loading.")
-        return global_step
+        if load_model_only:
+            model_path = os.path.join(ckpt_path, "model.safetensors")
+            if not Path(model_path).exists():
+                raise FileNotFoundError(f"Model checkpoint not found at {model_path}.")
+            rank_zero_print(f"Loading model state from {model_path}")
+            # unwrap if necessary
+            self.model = accelerator.unwrap_model(self.model)
+            # load model state
+            self.model.load_state_dict(load_file(model_path), strict=True)
+            self.model = accelerator.prepare(self.model)
+        else:
+            accelerator.load_state(ckpt_path, load_kwargs={'weights_only': False})
+            global_step = int(os.path.basename(ckpt_path).split('_')[1].split('.')[0])
+            
+            if self.ema:
+                ema_save_path = os.path.join(ckpt_path, "ema.safetensors")
+                if Path(ema_save_path).exists():
+                    rank_zero_print(f"Loading EMA state from {ema_save_path}")
+                    self.ema.load_state_dict(load_file(ema_save_path))
+                else:
+                    rank_zero_print(f"No EMA state found at {ema_save_path}. Skipping EMA loading.")
+            return global_step
 
     def save_checkpoint(self, global_step: int, accelerator: Accelerator, save_top_k=None) -> None:
         save_dir = os.path.join(hydra.core.hydra_config.HydraConfig.get()["runtime"]["output_dir"], "checkpoints")

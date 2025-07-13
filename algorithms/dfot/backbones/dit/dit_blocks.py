@@ -231,6 +231,7 @@ class MatrixAttention(nn.Module):
         proj_drop: float = 0.0,
         norm_layer: nn.Module = nn.LayerNorm,
         rope = None,
+        flatten_rope=False,
         **kwargs
         # fused_attn: bool = True,
     ):
@@ -256,7 +257,9 @@ class MatrixAttention(nn.Module):
         self.proj_u = nn.Parameter(torch.rand(self.embed_col_dim, col_dim))
         self.proj_v = nn.Parameter(torch.rand(self.embed_row_dim, row_dim))
         self.proj_drop = nn.Dropout(proj_drop)
+
         self.rope = rope
+        self.flatten_rope = flatten_rope
 
     def forward(
         self, 
@@ -281,8 +284,12 @@ class MatrixAttention(nn.Module):
             # => duplicate RoPE or shift smally? 
             # 1 2 3 4
             # 1 2 3 4
-            q = rearrange(self.rope(rearrange(q, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
-            k = rearrange(self.rope(rearrange(k, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
+            if self.flatten_rope:
+                q = rearrange(self.rope(rearrange(q, 'b c r l n d -> b c r l (n d)')), 'b c r l (n d) -> b c r l n d')
+                k = rearrange(self.rope(rearrange(k, 'b c r l n d -> b c r l (n d)')), 'b c r l (n d) -> b c r l n d')
+            else:
+                q = rearrange(self.rope(rearrange(q, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
+                k = rearrange(self.rope(rearrange(k, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
 
         q = q * self.scale  # (batch_size, num_col_heads, num_row_heads, n_tokens, height, width)
         attn_map = torch.einsum('bcrlnd,bcrknd->bcrlk', q, k)  # (B, num_col_heads, num_row_heads, N, N)
@@ -482,6 +489,7 @@ class MatrixDiTBlock(nn.Module):
         embed_row_dim: Optional[int] = None,
         mlp_ratio: Optional[float] = 4.0,
         matrix_rope: Optional[RotaryEmbeddingND] = None,
+        flatten_matrix_rope: bool = False,
         **block_kwargs: dict,
     ):
         """
@@ -501,7 +509,8 @@ class MatrixDiTBlock(nn.Module):
             embed_row_dim=embed_row_dim,
             num_col_heads=num_col_heads,
             num_row_heads=num_row_heads,
-            rope=matrix_rope, 
+            rope=matrix_rope,
+            flatten_rope=flatten_matrix_rope,
             #**block_kwargs
         )
         self.use_mlp = mlp_ratio is not None
@@ -573,6 +582,7 @@ class MatrixCrossDiTBlock(nn.Module):
         mlp_ratio: Optional[float] = 4.0,
         rope: Optional[RotaryEmbeddingND] = None,
         matrix_rope: Optional[RotaryEmbeddingND] = None,
+        flatten_matrix_rope: bool = False,
         **block_kwargs: dict,
     ):
         """
@@ -592,7 +602,8 @@ class MatrixCrossDiTBlock(nn.Module):
             embed_row_dim=embed_row_dim,
             num_col_heads=num_col_heads,
             num_row_heads=num_row_heads,
-            rope=matrix_rope, 
+            rope=matrix_rope,
+            flatten_rope=flatten_matrix_rope,
         )
         self.attn2 = CrossAttention(
             dim=row_hidden_size,
@@ -683,6 +694,7 @@ class MatrixSelfDiTBlock(nn.Module):
         mlp_ratio: Optional[float] = 4.0,
         rope: Optional[RotaryEmbeddingND] = None,
         matrix_rope: Optional[RotaryEmbeddingND] = None,
+        flatten_matrix_rope: bool = False,
         **block_kwargs: dict,
     ):
         """
@@ -702,7 +714,8 @@ class MatrixSelfDiTBlock(nn.Module):
             embed_row_dim=embed_row_dim,
             num_col_heads=num_col_heads,
             num_row_heads=num_row_heads,
-            rope=matrix_rope, 
+            rope=matrix_rope,
+            flatten_rope=flatten_matrix_rope,
         )
         self.norm2 = AdaLayerNormZero(row_hidden_size)
         self.attn2 = Attention(

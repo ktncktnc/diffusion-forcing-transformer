@@ -130,6 +130,7 @@ class DiTBase(nn.Module):
             self.num_col_heads = self.kwargs.get("num_col_heads", num_heads)
             self.num_row_heads = self.kwargs.get("num_row_heads", num_heads)
             self.matrix_dim = self.embed_col_dim // self.num_col_heads * self.embed_row_dim // self.num_row_heads
+            self.flatten_matrix_rope = kwargs.get("flatten_matrix_rope")
 
         self.mlp_ratio = mlp_ratio
         self.pos_emb_type = pos_emb_type
@@ -151,7 +152,8 @@ class DiTBase(nn.Module):
                     num_heads=num_heads,
                     mlp_ratio=mlp_ratio,
                     rope=self.rope,
-                    matrix_rope=self.temporal_rope
+                    matrix_rope=self.temporal_rope,
+                    flatten_matrix_rope=self.flatten_matrix_rope
                 ))
             else:
                 self.blocks.append(DiTBlock(
@@ -177,7 +179,8 @@ class DiTBase(nn.Module):
                         num_heads=num_heads,
                         mlp_ratio=mlp_ratio,
                         rope=self.rope,
-                        matrix_rope=self.temporal_rope
+                        matrix_rope=self.temporal_rope,
+                        flatten_matrix_rope=self.flatten_matrix_rope
                     ))
                 else:
                     self.temporal_blocks.append(DiTBlock(
