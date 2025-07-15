@@ -6,15 +6,16 @@ defaults:
 
 latent:
   enabled: True
-  # suffix: 1a8547fb
-  num_channels: 32
+  suffix: artitok_taichi500k
+  num_channels: 4
+  shape: [4, 1, 32]
 save_dir: /scratch/s224075134/temporal_diffusion/datasets/video/taichi
 max_frames: 16
 frame_skip: 1
 context_length: 4
 resolution: 256
 data_mean: [0]
-data_std: [0.5] # scaling factor
+data_std: [2.0] # scaling factor
 
 # unconditional
 external_cond_type: null

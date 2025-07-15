@@ -29,7 +29,8 @@ from datasets.video import (
     UCF101AdvancedVideoDataset,
     SplitUCF101AdvancedVideoDataset,
     BAIRAdvancedVideoDataset,
-    DMLabAdvancedVideoDataset
+    DMLabAdvancedVideoDataset,
+    TaichiAdvancedVideoDataset
 )
 from datetime import datetime
 import time
@@ -64,7 +65,8 @@ class SimpleVideoGenerationExperiment:
         cond_ucf_101_scaling=UCF101AdvancedVideoDataset,
         split_cond_ucf_101=SplitUCF101AdvancedVideoDataset,
         bair=BAIRAdvancedVideoDataset,
-        dmlab=DMLabAdvancedVideoDataset
+        dmlab=DMLabAdvancedVideoDataset,
+        taichi=TaichiAdvancedVideoDataset,
     )
     def __init__(
         self,
@@ -305,21 +307,21 @@ class SimpleVideoGenerationExperiment:
 
     def _validate(self, val_loader, accelerator, namespace='validation') -> None:
         # Load EMA if enabled
-        # if self.ema:
-        #     self.model = accelerator.unwrap_model(self.model)
-        #     self.ema.store(self.model)
-        #     self.ema.copy_to(self.model)
+        model = accelerator.unwrap_model(self.model)
+        if self.ema:
+            self.ema.store(model)
+            self.ema.copy_to(model)
 
         val_yielder = make_data_yielder(val_loader)
 
         # Load required components for validation
-        self.model.new_on_validation_epoch_start()
+        model.new_on_validation_epoch_start()
         num_validate_batches = min(len(val_loader), self.cfg.experiment.validation.limit_batch)
 
         rank_zero_print("\n********** Starting validation... **********")
         rank_zero_print("Num batches:", num_validate_batches)
 
-        self.model.eval()
+        model.eval()
         with torch.no_grad():
             total_loss = 0.0
             for i, batch in enumerate(val_yielder):
@@ -327,8 +329,8 @@ class SimpleVideoGenerationExperiment:
                     break
 
                 # Preprocess
-                batch = self.model.on_after_batch_transfer(batch, i)
-                denoising_output, all_videos = self.model.new_validation_step(batch, i, namespace="validation")
+                batch = model.on_after_batch_transfer(batch, i)
+                denoising_output, all_videos = model.new_validation_step(batch, i, namespace="validation")
 
                 # Process denoising output
                 total_loss += denoising_output["loss"].item()
@@ -348,7 +350,7 @@ class SimpleVideoGenerationExperiment:
     
                 # Log samples
                 if self.logger:
-                    self.log_videos(all_videos, namespace=namespace, context_frames=self.model.n_context_frames, global_step=i)
+                    self.log_videos(all_videos, namespace=namespace, context_frames=model.n_context_frames, global_step=i)
                 
                 accelerator.wait_for_everyone()
                 #TODO: gather distributed data if needed
@@ -370,17 +372,16 @@ class SimpleVideoGenerationExperiment:
                 self.log_dict(result, namespace, is_print=True)
 
         # Remove unnecessary components
-        self.model.generator = None
-        self.model.vae = None
-        self.model.num_logged_videos = 0
+        model.generator = None
+        model.vae = None
+        model.num_logged_videos = 0
         self.num_logged_videos = 0
-        self.model.train()
+        model.train()
 
         # Restore EMA if it was used
-        # if self.ema:
-        #     # Restore original model parameters
-        #     self.ema.restore(self.model)
-        #     self.model = accelerator.prepare(self.model)
+        if self.ema:
+            # Restore original model parameters
+            self.ema.restore(model)
 
         rank_zero_print("********** Validation completed **********\n")
 
@@ -500,7 +501,7 @@ class SimpleVideoGenerationExperiment:
             checkpoints = os.listdir(save_dir)
             checkpoints = [d for d in checkpoints if d.startswith('checkpoint')]
             checkpoints = sorted(checkpoints, key=lambda x: int(x.split('_')[1]))
-            if len(checkpoints) >= save_top_k:
+            if len(checkpoints) > save_top_k:
                 num_to_remove = len(checkpoints) - save_top_k + 1
                 removing_checkpoints = checkpoints[0:num_to_remove]
 
@@ -511,8 +512,6 @@ class SimpleVideoGenerationExperiment:
                     shutil.rmtree(removing_checkpoint)
 
         rank_zero_print(f"Saving checkpoint to {save_path}")
-
-        # Save the model state
         accelerator.save_state(save_path)
 
         # Save the EMA state if applicable

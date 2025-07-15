@@ -54,6 +54,7 @@ python -m main +name=Preprocessing_UCF101 dataset=ucf_101 algorithm=kl_autoencod
 python -m main +name=Preprocessing_Minecraft dataset=minecraft algorithm=kl_autoencoder_preprocessor experiment=video_latent_preprocessing wandb.mode=disabled
 python -m main +name=Preprocessing_Minecraft dataset=minecraft algorithm=dc_ae_16x_autoencoder_preprocessor experiment=video_latent_preprocessing wandb.mode=disabled
 ## Taichi
+python -m main +name=Preprocessing_Taichi dataset=taichi algorithm=titok_kl_preprocessor experiment=video_latent_preprocessing wandb.mode=disabled
 
 # Training
 
@@ -99,6 +100,8 @@ python -m main +name=EVAL_DFOT_DMLAB_16 dataset=dmlab algorithm=dfot_video exper
 ### DFoT-random_uniform
 
 python -m main +name=EVAL_DFOT_DMLAB_16 dataset=dmlab algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-06-09/19-43-35/checkpoints/epoch\=0-step\=500000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=256 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled
+
+python -m main '+name=DFOT_DMLAB_16_RU' 'dataset=dmlab' 'algorithm=dfot_video' 'experiment=video_generation' 'algorithm.noise_level=random_uniform' 'algorithm.variable_context.enabled=True' @DiT/B 'load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-06-20/15-47-20/checkpoints/epoch\=5-step\=500000.ckpt' 'wandb.mode=disabled' 'experiment.tasks=[validation]'
 
 ### REFDFot-random_independent
 

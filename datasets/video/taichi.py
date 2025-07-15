@@ -3,6 +3,7 @@ import io
 import tarfile
 import torch
 import numpy as np
+from PIL import Image
 import cv2
 import os
 from omegaconf import DictConfig
@@ -86,7 +87,7 @@ class TaichiBaseVideoDataset(BaseVideoDataset):
         video = []
         for frame_file in frame_files[start_frame:end_frame]:
             frame_path = os.path.join(video_path, frame_file)
-            frame = np.array(cv2.imread(frame_path))
+            frame = np.array(cv2.cvtColor(cv2.imread(frame_path), cv2.COLOR_BGR2RGB))
             video.append(frame)
         video = np.stack(video, axis=0)
         return torch.from_numpy(video).permute(0, 3, 1, 2) / 255.0
@@ -135,6 +136,8 @@ class TaichiAdvancedVideoDataset(
         split: SPLIT = "training",
         current_epoch: Optional[int] = None,
     ):
+        if split == 'training':
+            split = 'train'
         if split == "validation":
             split = "test"
         

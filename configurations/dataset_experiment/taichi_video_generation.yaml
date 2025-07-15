@@ -1,0 +1,73 @@
+# @package _global_
+# 12 x H100 GPUs
+
+# When the (dataset, experiment) pair aligns with the file name of this yaml, 
+# the values here will override individual yamls files for dataset, algorithm and experiment.
+# useful for dataset-specific overrides
+
+defaults:
+  - ../algorithm/backbone@algorithm.backbone: dit3d
+  - ../algorithm@algorithm.vae: titok_kl_preprocessor
+
+dataset:
+  # num_eval_videos: 1000
+  subdataset_size: null
+  latent:
+    enabled: True
+    suffix: artitok_taichi500k
+
+algorithm:
+  latent_shape: [1, 32, 4] # fixed latent shape, if not null
+  num_sanity_val_steps: 1
+  lr_scheduler:
+    num_warmup_steps: 10000
+  weight_decay: 0
+  backbone:
+    patch_size: 1
+  diffusion:
+    loss_weighting:
+      cum_snr_decay: 0.96
+  logging:
+    n_metrics_frames: 16
+    max_num_videos: 16
+    metrics: [vbench, fvd, is, fid, lpips, mse, ssim, psnr]
+  contrastive_clip_frames: 8
+  diffusion_clip_frames: 16
+  contrastive_loss_weight: 0.3
+  vae:
+    pretrained_path: /scratch/s224075134/temporal_diffusion/AR-Diffusion/vae_checkpoints/taichi_vae/ckpt_dir/checkpoint-500000/model.safetensors
+    batch_size: 16
+
+experiment:
+  ema:
+    enable: True
+    decay: 0.999
+  training:
+    max_steps: 500000
+    max_epochs: null
+    lr: 1e-4
+    batch_size: 32
+    data:
+      num_workers: 11
+      shuffle: True
+    checkpointing:
+      every_n_train_steps: 25000
+      every_n_epochs: null
+      save_last: True
+      save_top_k: 5
+      monitor: "prediction/fvd"
+  validation:
+    batch_size: 32
+    val_every_n_step: 25000
+    val_every_n_epoch: null
+    data:
+      num_workers: 1
+    limit_batch: 50
+    validate_training_set: False
+    validate_history_free: False
+  test:
+    batch_size: 32
+    data:
+      num_workers: 1
+    limit_batch: 1.0
+  reload_dataloaders_every_n_epochs: 1

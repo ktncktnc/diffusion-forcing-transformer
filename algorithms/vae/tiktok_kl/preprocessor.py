@@ -75,10 +75,7 @@ class Titok_KLPreprocessor(BasePytorchAlgo):
         videos = self._rearrange_and_normalize(videos)
         # Encode the video data into a latent space
         # always convert to float16 (as they will be saved as float16 tensors)
-
-        latent_dist = self._encode_videos(videos)
-        latents = latent_dist.sample().to(torch.float16)
-
+        latents = self._encode_videos(videos)
         # just to see the progress in wandb
         if batch_idx % 1000 == 0:
             self.log("dummy", 0.0)
@@ -105,20 +102,12 @@ class Titok_KLPreprocessor(BasePytorchAlgo):
             )
 
         # save the latent to disk
-        latents_to_save = (
-            rearrange(
-                latents,
-                "(b f) c h w -> b f c h w",
-                b=batch_size,
-            )
-            .detach()
-            .cpu()
-        )
+        latents_to_save = latents.detach().cpu()
         for latent, latent_path in zip(latents_to_save, latent_paths):
             # should clone latent to avoid having large file size
             safe_torch_save(latent, latent_path)
         
-        del latent_dist
+        # del latent_dist
         del latents
         del videos
 
@@ -128,19 +117,18 @@ class Titok_KLPreprocessor(BasePytorchAlgo):
         chunks = video.chunk(
             (len(video) + self.max_encode_length - 1) // self.max_encode_length, dim=0
         )
-        latent_dist_list = []
+        latents = []
         for chunk in chunks:
-            latent_dist_list.append(self.vae.encode(chunk))
-        return DiagonalGaussianDistribution.cat(latent_dist_list)
+            # latent_dist_list.append(self.vae.encode(chunk))
+            latents.append(self.vae.encode(chunk, sample=True))
+        return torch.cat(latents, dim=0)
 
     def _rearrange_and_normalize(self, videos: torch.Tensor) -> torch.Tensor:
         # videos = rearrange(videos, "b f c h w -> (b f) c h w")
-        videos = 2.0 * videos - 1.0
+        # videos = 2.0 * videos - 1.0
         return videos
 
-    def _rearrange_and_unnormalize(
-        self, videos: torch.Tensor, batch_size: int
-    ) -> torch.Tensor:
-        videos = 0.5 * videos + 0.5
+    def _rearrange_and_unnormalize(self, videos: torch.Tensor, batch_size: int) -> torch.Tensor:
+        # videos = 0.5 * videos + 0.5
         # videos = rearrange(videos, "(b f) c h w -> b f c h w", b=batch_size)
         return videos

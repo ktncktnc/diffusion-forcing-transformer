@@ -81,6 +81,7 @@ class DiTBase(nn.Module):
     def __init__(
         self,
         num_patches: Optional[int] = None,
+        spatial_grid_size: Union[int, Tuple[int, int]] = None,
         max_temporal_length: int = 16,
         out_channels: int = 4,
         variant: Variant = "full",
@@ -110,6 +111,7 @@ class DiTBase(nn.Module):
         """
         super().__init__()
         self._check_args(num_patches, variant, pos_emb_type)
+        self._spatial_grid_size = spatial_grid_size
         self.kwargs = kwargs
 
         self.learn_sigma = learn_sigma
@@ -131,6 +133,7 @@ class DiTBase(nn.Module):
             self.num_row_heads = self.kwargs.get("num_row_heads", num_heads)
             self.matrix_dim = self.embed_col_dim // self.num_col_heads * self.embed_row_dim // self.num_row_heads
             self.flatten_matrix_rope = kwargs.get("flatten_matrix_rope")
+            self.matrix_multi_token = kwargs.get("matrix_multi_token")
 
         self.mlp_ratio = mlp_ratio
         self.pos_emb_type = pos_emb_type
@@ -153,7 +156,8 @@ class DiTBase(nn.Module):
                     mlp_ratio=mlp_ratio,
                     rope=self.rope,
                     matrix_rope=self.temporal_rope,
-                    flatten_matrix_rope=self.flatten_matrix_rope
+                    flatten_matrix_rope=self.flatten_matrix_rope,
+                    matrix_multi_token=self.matrix_multi_token
                 ))
             else:
                 self.blocks.append(DiTBlock(
@@ -180,7 +184,8 @@ class DiTBase(nn.Module):
                         mlp_ratio=mlp_ratio,
                         rope=self.rope,
                         matrix_rope=self.temporal_rope,
-                        flatten_matrix_rope=self.flatten_matrix_rope
+                        flatten_matrix_rope=self.flatten_matrix_rope,
+                        matrix_multi_token=self.matrix_multi_token
                     ))
                 else:
                     self.temporal_blocks.append(DiTBlock(
@@ -216,21 +221,21 @@ class DiTBase(nn.Module):
             case "sinusoidal_2d":
                 self.pos_emb = SinusoidalPositionalEmbedding(
                     embed_dim=self.hidden_size,
-                    shape=(self.spatial_grid_size, self.spatial_grid_size),
+                    shape=self.spatial_grid_size,
                 )
             case "sinusoidal_3d":
                 self.pos_emb = SinusoidalPositionalEmbedding(
                     embed_dim=self.hidden_size,
                     shape=(
                         self.max_temporal_length,
-                        self.spatial_grid_size,
-                        self.spatial_grid_size,
+                        self.spatial_grid_size[0],
+                        self.spatial_grid_size[1],
                     ),
                 )
             case "sinusoidal_factorized":
                 self.spatial_pos_emb = SinusoidalPositionalEmbedding(
                     embed_dim=self.hidden_size,
-                    shape=(self.spatial_grid_size, self.spatial_grid_size),
+                    shape=self.spatial_grid_size,
                 )
                 self.temporal_pos_emb = SinusoidalPositionalEmbedding(
                     embed_dim=self.hidden_size,
@@ -239,18 +244,15 @@ class DiTBase(nn.Module):
             case "rope_2d":
                 self.rope = RotaryEmbedding2D(
                         dim=self.hidden_size//self.num_heads,
-                        sizes=(
-                            self.spatial_grid_size,
-                            self.spatial_grid_size,
-                        ),
+                        sizes=self.spatial_grid_size,
                 )
             case "rope_3d":
                 self.rope = RotaryEmbedding3D(
                         dim=self.hidden_size//self.num_heads,
                         sizes=(
                             self.max_temporal_length,
-                            self.spatial_grid_size,
-                            self.spatial_grid_size,
+                            self.spatial_grid_size[0],
+                            self.spatial_grid_size[1],
                         ),
                     )
         
@@ -402,14 +404,20 @@ class DiTBase(nn.Module):
         return self.pos_emb_type == "sinusoidal_factorized"
 
     @property
-    def spatial_grid_size(self) -> Optional[int]:
+    def spatial_grid_size(self) -> Optional[Tuple[int, int]]:
         if self.num_patches is None:
             return None
+        
+        if isinstance(self._spatial_grid_size, int):
+            return (self._spatial_grid_size, self._spatial_grid_size)
+        elif isinstance(self._spatial_grid_size, tuple):
+            return self._spatial_grid_size
+        
         grid_size = int(self.num_patches**0.5)
         assert (
             grid_size * grid_size == self.num_patches
         ), "num_patches must be a square number"
-        return grid_size
+        return (grid_size, grid_size)
 
     @staticmethod
     def _check_args(num_patches: Optional[int], variant: Variant, pos_emb_type: PosEmb):

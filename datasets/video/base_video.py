@@ -528,26 +528,25 @@ class BaseAdvancedVideoDataset(BaseVideoDataset):
         video_metadata = self.metadata[video_idx]
         video_length = self.video_length(video_metadata)
         start_frame, end_frame = clip_idx, min(clip_idx + self.n_frames, video_length)
-
         video, latent, cond = None, None, None
         if self.use_preprocessed_latents:
             latent = self.load_latent(video_metadata, start_frame, end_frame)
 
-        if self.use_preprocessed_latents and self.split == "training":
-            # do not load video if we are training with latents
-            if self.external_cond_dim > 0:
-                cond = self.load_cond(video_metadata, start_frame, end_frame)
-
-        else:
-            if self.external_cond_dim > 0:
-                # load video together with condition
-                video, cond = self.load_video_and_cond(
-                    video_metadata, start_frame, end_frame
-                )
+            # Not load video in training for faster
+            if self.split in ["training", "train"]:
+                if self.external_cond_dim > 0:
+                    # do not load video if we are training with latents
+                    cond = self.load_cond(video_metadata, start_frame, end_frame)
             else:
-                # load video only
-                video = self.load_video(video_metadata, start_frame, end_frame)
-
+                if self.external_cond_dim > 0:
+                    # load video together with condition
+                    video, cond = self.load_video_and_cond(
+                        video_metadata, start_frame, end_frame
+                    )
+                else:
+                    # load video only
+                    video = self.load_video(video_metadata, start_frame, end_frame)
+        
         lens = [len(x) for x in (video, cond, latent) if x is not None]
         assert len(set(lens)) == 1, "video, cond, latent must have the same length"
         pad_len = self.n_frames - lens[0]

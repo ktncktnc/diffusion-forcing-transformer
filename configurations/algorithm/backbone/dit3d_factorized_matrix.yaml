@@ -12,4 +12,5 @@ depth: 12
 mlp_ratio: 4.0
 matrix_block: matrix
 flatten_matrix_rope: False
+matrix_multi_token: False
 use_gradient_checkpointing: True

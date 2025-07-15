@@ -1,6 +1,7 @@
 defaults:
   - base_pytorch_algo
-  
+
+name: titok_kl_preprocessor
 image_size: 256
 token_size: 4
 use_l2_norm: true

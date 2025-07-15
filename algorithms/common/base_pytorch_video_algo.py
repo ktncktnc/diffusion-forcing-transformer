@@ -25,7 +25,7 @@ from algorithms.common.attn_hook import register_hooks, clear_hooks, save_attent
 from utils.print_utils import cyan
 from utils.distributed_utils import rank_zero_print
 from .base_pytorch_algo import BasePytorchAlgo
-from algorithms.vae import ImageVAE, VideoVAE, MyAutoencoderDC, AutoencoderKL
+from algorithms.vae import ImageVAE, VideoVAE, MyAutoencoderDC, AutoencoderKL, TiTok_KL
 
 
 class BaseVideoAlgo(BasePytorchAlgo):
@@ -50,9 +50,12 @@ class BaseVideoAlgo(BasePytorchAlgo):
         self.temporal_downsampling_factor = cfg.latent.downsampling_factor[0]
         self.is_latent_video_vae = self.temporal_downsampling_factor > 1
         if self.is_latent_diffusion:
-            self.x_shape = [cfg.latent.num_channels] + [
-                d // cfg.latent.downsampling_factor[1] for d in self.x_shape[1:]
-            ]
+            if cfg.latent.shape is not None:
+                self.x_shape = cfg.latent.shape
+            else:
+                self.x_shape = [cfg.latent.num_channels] + [
+                    d // cfg.latent.downsampling_factor[1] for d in self.x_shape[1:]
+                ]
             if self.is_latent_video_vae:
                 self.check_video_vae_compatibility(cfg)
 
@@ -611,6 +614,22 @@ class BaseVideoAlgo(BasePytorchAlgo):
             self.vae = AutoencoderKL.from_pretrained(
                 **self.cfg.vae
             ).to(self.device)
+        elif hasattr(self.cfg.vae, 'name') and self.cfg.vae.name == "titok_kl_preprocessor":
+            self.vae = TiTok_KL(
+                image_size=self.cfg.vae.image_size,
+                token_size=self.cfg.vae.token_size,
+                use_l2_norm=self.cfg.vae.use_l2_norm,
+                vit_enc_model_size=self.cfg.vae.vit_enc_model_size,
+                vit_dec_model_size=self.cfg.vae.vit_dec_model_size,
+                vit_enc_patch_size=self.cfg.vae.vit_enc_patch_size,
+                vit_dec_patch_size=self.cfg.vae.vit_dec_patch_size,
+                num_latent_tokens=self.cfg.vae.num_latent_tokens,
+                use_checkpoint=self.cfg.vae.use_checkpoint,
+            )
+            import safetensors
+            state_dict = safetensors.torch.load_file(self.cfg.vae.pretrained_path, device='cpu')
+            self.vae.load_state_dict(state_dict, strict=True)
+            self.vae.to(self.device)
         else:
             vae_cls = VideoVAE if self.is_latent_video_vae else ImageVAE
             self.vae = vae_cls.from_pretrained(
@@ -647,10 +666,15 @@ class BaseVideoAlgo(BasePytorchAlgo):
         outputs = []
         for chunk in chunks:
             b = chunk.shape[0]
-            if not self.is_latent_video_vae:
+            if isinstance(self.vae, TiTok_KL):
+                chunk = rearrange(chunk, "b c t h w -> b t c h w")
+            elif not self.is_latent_video_vae:
                 chunk = rearrange(chunk, "b c t h w -> (b t) c h w")
+
             output = vae_fn(chunk)
-            if not self.is_latent_video_vae:
+            if isinstance(self.vae, TiTok_KL):
+                output = rearrange(output, "b t c h w -> b c t h w")
+            elif not self.is_latent_video_vae:
                 output = rearrange(output, "(b t) c h w -> b c t h w", b=b)
             outputs.append(output)
         return rearrange(torch.cat(outputs, 0), f"b c t h w -> {shape}")
@@ -660,6 +684,8 @@ class BaseVideoAlgo(BasePytorchAlgo):
             fn = lambda y: self.vae.encode(2.0 * y - 1.0)
         elif isinstance(self.vae, AutoencoderKL):
             fn = lambda y: self.vae.encode(2.0 * y - 1.0, return_dict=False)[0].sample()
+        elif isinstance(self.vae, TiTok_KL):
+            fn = lambda y: self.vae.encode(y, sample=True)
         else:
             fn = lambda y: self.vae.encode(2.0 * y - 1.0).sample()
         return self._run_vae(x, shape, fn)
@@ -676,6 +702,12 @@ class BaseVideoAlgo(BasePytorchAlgo):
                 latents,
                 shape,
                 lambda y: self.vae.decode(y, return_dict=False)[0] * 0.5 + 0.5
+            )
+        elif isinstance(self.vae, TiTok_KL):
+            return self._run_vae(
+                latents,
+                shape,
+                lambda y: self.vae.decode(y)
             )
 
         return self._run_vae(

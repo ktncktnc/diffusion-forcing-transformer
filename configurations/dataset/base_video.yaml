@@ -16,6 +16,7 @@ latent:
   # pre_sample: preprocess latents as samples, online: compute latents online (not saved)
   suffix: null # latents are saved at ${save_dir}_${latent.suffix} folder
   downsampling_factor: [1, 8] # [temporal, spatial] downsampling factor for latents
+  shape: null # Shape of the latent representation if not null
   # (e.g. [4, 8] if 17x128x128 to 5x16x16)
   num_channels: 4 # number of channels for the latent representation
 # Configuration for lengths and shapes

@@ -232,6 +232,7 @@ class MatrixAttention(nn.Module):
         norm_layer: nn.Module = nn.LayerNorm,
         rope = None,
         flatten_rope=False,
+        multi_token=False,
         **kwargs
         # fused_attn: bool = True,
     ):
@@ -245,9 +246,19 @@ class MatrixAttention(nn.Module):
         self.num_heads = num_col_heads * num_row_heads
         assert self.embed_col_dim % num_col_heads == 0, "embed_col_dim must be divisible by num_col_heads"
         assert self.embed_row_dim % num_row_heads == 0, "embed_row_dim must be divisible by num_row_heads"
+
+        self.rope = rope
+        self.flatten_rope = flatten_rope
+        self.multi_token = multi_token
+        assert not (self.flatten_rope and self.multi_token), "flatten_rope and multi_token cannot be used together."
+
         self.head_col_dim = self.embed_col_dim // num_col_heads
         self.head_row_dim = self.embed_row_dim // num_row_heads
-        self.scale = (self.head_col_dim*self.head_row_dim)**-0.5
+        
+        if self.multi_token:
+            self.scale = self.head_row_dim**-0.5
+        else:
+            self.scale = (self.head_col_dim*self.head_row_dim)**-0.5
 
         self.qkv_u = nn.Parameter(torch.rand(col_dim, self.embed_col_dim))
         self.qkv_v = nn.Parameter(torch.rand(row_dim, self.embed_row_dim*3))
@@ -258,8 +269,6 @@ class MatrixAttention(nn.Module):
         self.proj_v = nn.Parameter(torch.rand(self.embed_row_dim, row_dim))
         self.proj_drop = nn.Dropout(proj_drop)
 
-        self.rope = rope
-        self.flatten_rope = flatten_rope
 
     def forward(
         self, 
@@ -285,18 +294,29 @@ class MatrixAttention(nn.Module):
             # 1 2 3 4
             # 1 2 3 4
             if self.flatten_rope:
-                q = rearrange(self.rope(rearrange(q, 'b c r l n d -> b c r l (n d)')), 'b c r l (n d) -> b c r l n d')
-                k = rearrange(self.rope(rearrange(k, 'b c r l n d -> b c r l (n d)')), 'b c r l (n d) -> b c r l n d')
+                q = rearrange(self.rope(rearrange(q, 'b c r l n d -> b c r l (n d)')), 'b c r l (n d) -> b c r l n d', n=self.head_col_dim, d=self.head_row_dim)
+                k = rearrange(self.rope(rearrange(k, 'b c r l n d -> b c r l (n d)')), 'b c r l (n d) -> b c r l n d', n=self.head_col_dim, d=self.head_row_dim)
             else:
                 q = rearrange(self.rope(rearrange(q, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
                 k = rearrange(self.rope(rearrange(k, 'b c r l n d -> b c r n l d')), 'b c r n l d -> b c r l n d')
 
         q = q * self.scale  # (batch_size, num_col_heads, num_row_heads, n_tokens, height, width)
-        attn_map = torch.einsum('bcrlnd,bcrknd->bcrlk', q, k)  # (B, num_col_heads, num_row_heads, N, N)
-        attn_map = attn_map.softmax(dim=-1)  # shape: (B, num_col_heads, num_row_heads, N, N)
+        # Do the row-wise attention
+        if self.multi_token:
+            q = rearrange(q, 'b c r l n d -> b c r n l d')  # View each row as a single token
+            k = rearrange(k, 'b c r l n d -> b c r n l d')  # View each row as a single token
+            v = rearrange(v, 'b c r l n d -> b c r n l d')  # View each row as a single token
+            attn_map = torch.einsum('bcrnld,bcrnkd->bcrnlk', q, k)  # (B, num_col_heads, num_row_heads, height, N, N)
+            attn_map = attn_map.softmax(dim=-1)  # shape: (B, num_col_heads, num_row_heads, height, N, N)
 
-        x = torch.einsum('bcrlk,bcrknd->bcrlnd', self.attn_drop(attn_map), v) # (B, col_num_head, row_num_head, num_tokens, H, W)
-        x = rearrange(x, 'b c r l n d -> b l (c n) (r d)')  # (B, L, num_col_heads * head_col_dim, num_row_heads * head_row_dim)
+            x = torch.einsum('bcrnlk,bcrnkd->bcrnld', self.attn_drop(attn_map), v) # (B, col_num_head, row_num_head, num_tokens, H, W)
+            x = rearrange(x, 'b c r n l d -> b l (c n) (r d)')  # (B, L, num_col_heads * head_col_dim, num_row_heads * head_row_dim)
+        else:
+            attn_map = torch.einsum('bcrlnd,bcrknd->bcrlk', q, k)  # (B, num_col_heads, num_row_heads, N, N)
+            attn_map = attn_map.softmax(dim=-1)  # shape: (B, num_col_heads, num_row_heads, N, N)
+
+            x = torch.einsum('bcrlk,bcrknd->bcrlnd', self.attn_drop(attn_map), v) # (B, col_num_head, row_num_head, num_tokens, H, W)
+            x = rearrange(x, 'b c r l n d -> b l (c n) (r d)')  # (B, L, num_col_heads * head_col_dim, num_row_heads * head_row_dim)
 
         x = matrix_mul(x, self.proj_u, self.proj_v)  # (B, N, C)
         x = self.proj_drop(x)
@@ -490,6 +510,7 @@ class MatrixDiTBlock(nn.Module):
         mlp_ratio: Optional[float] = 4.0,
         matrix_rope: Optional[RotaryEmbeddingND] = None,
         flatten_matrix_rope: bool = False,
+        matrix_multi_token: bool = False,
         **block_kwargs: dict,
     ):
         """
@@ -511,6 +532,7 @@ class MatrixDiTBlock(nn.Module):
             num_row_heads=num_row_heads,
             rope=matrix_rope,
             flatten_rope=flatten_matrix_rope,
+            multi_token=matrix_multi_token,
             #**block_kwargs
         )
         self.use_mlp = mlp_ratio is not None
@@ -583,6 +605,7 @@ class MatrixCrossDiTBlock(nn.Module):
         rope: Optional[RotaryEmbeddingND] = None,
         matrix_rope: Optional[RotaryEmbeddingND] = None,
         flatten_matrix_rope: bool = False,
+        matrix_multi_token: bool = False,
         **block_kwargs: dict,
     ):
         """
@@ -604,6 +627,7 @@ class MatrixCrossDiTBlock(nn.Module):
             num_row_heads=num_row_heads,
             rope=matrix_rope,
             flatten_rope=flatten_matrix_rope,
+            multi_token=matrix_multi_token,
         )
         self.attn2 = CrossAttention(
             dim=row_hidden_size,
@@ -695,6 +719,7 @@ class MatrixSelfDiTBlock(nn.Module):
         rope: Optional[RotaryEmbeddingND] = None,
         matrix_rope: Optional[RotaryEmbeddingND] = None,
         flatten_matrix_rope: bool = False,
+        matrix_multi_token: bool = False,
         **block_kwargs: dict,
     ):
         """
@@ -716,6 +741,7 @@ class MatrixSelfDiTBlock(nn.Module):
             num_row_heads=num_row_heads,
             rope=matrix_rope,
             flatten_rope=flatten_matrix_rope,
+            multi_token=matrix_multi_token,
         )
         self.norm2 = AdaLayerNormZero(row_hidden_size)
         self.attn2 = Attention(

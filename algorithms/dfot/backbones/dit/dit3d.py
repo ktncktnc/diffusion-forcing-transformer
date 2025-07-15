@@ -37,15 +37,18 @@ class DiT3D(BaseBackbone):
 
         hidden_size = cfg.hidden_size
         self.patch_size = cfg.patch_size
-        channels, resolution, *_ = x_shape
-        assert (
-            resolution % self.patch_size == 0
-        ), "Resolution must be divisible by patch size."
-        self.num_patches = (resolution // self.patch_size) ** 2
+        channels, resolution_h, resolution_w, *_ = x_shape
+
+        # assert (
+        #     resolution % self.patch_size == 0
+        # ), "Resolution must be divisible by patch size."
+        self.num_patches_h = resolution_h // self.patch_size
+        self.num_patches_w = resolution_w // self.patch_size
+        self.num_patches = self.num_patches_h * self.num_patches_w
         out_channels = self.patch_size**2 * channels
 
         self.patch_embedder = PatchEmbed(
-            img_size=resolution,
+            img_size=(resolution_h, resolution_w),
             patch_size=self.patch_size,
             in_chans=self.in_channels,
             embed_dim=hidden_size,
@@ -54,6 +57,7 @@ class DiT3D(BaseBackbone):
 
         self.dit_base = DiTBase(
             num_patches=self.num_patches,
+            spatial_grid_size=(self.num_patches_h, self.num_patches_w),
             max_temporal_length=max_tokens,
             out_channels=out_channels,
             variant=cfg.variant,
@@ -69,6 +73,8 @@ class DiT3D(BaseBackbone):
             num_col_heads=cfg.get("num_col_heads", None),
             num_row_heads=cfg.get("num_row_heads", None),
             matrix_block=cfg.get("matrix_block", None),
+            flatten_matrix_rope=cfg.get("flatten_matrix_rope", None),
+            matrix_multi_token=cfg.get("matrix_multi_token", None),
         )
         self.initialize_weights()
 
@@ -119,7 +125,8 @@ class DiT3D(BaseBackbone):
         return rearrange(
             x,
             "b (h w) (p q c) -> b (h p) (w q) c",
-            h=int(self.num_patches**0.5),
+            h=self.num_patches_h,
+            w=self.num_patches_w,
             p=self.patch_size,
             q=self.patch_size,
         )
