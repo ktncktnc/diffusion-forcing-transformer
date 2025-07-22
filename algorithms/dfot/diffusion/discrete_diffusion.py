@@ -11,7 +11,8 @@ from ..backbones import (
     DiT3DPose,
     UViT3D,
     UViT3DPose,
-    FARDiT
+    FARDiT,
+    DIT1D
 )
 from .noise_schedule import make_beta_schedule
 
@@ -73,6 +74,8 @@ class DiscreteDiffusion(nn.Module):
                 model_cls = DiT3DPose
             case "far_dit":
                 model_cls = FARDiT
+            case "dit1d":
+                model_cls = DIT1D
             case _:
                 raise ValueError(f"unknown model type {self.backbone_cfg.name}")
         self.model = model_cls(

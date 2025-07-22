@@ -17,7 +17,9 @@ from .base_video import (
     BaseAdvancedVideoDataset,
     SPLIT
 )
+from decord import VideoReader
 from typing import List, Tuple
+from einops import rearrange
 
 
 class TaichiBaseVideoDataset(BaseVideoDataset):
@@ -37,13 +39,14 @@ class TaichiBaseVideoDataset(BaseVideoDataset):
         }
         ```
         """
-        video_paths = sorted(list((self.save_dir / split).glob("*/")), key=str)
+        # find mp4 videos
+        video_paths = sorted(list((self.save_dir / split).glob("*.mp4")), key=str)
         video_paths = [str(path) for path in video_paths]
         video_lengths: List[int] = []
 
         for video_path in tqdm(video_paths, desc=f"Loading {split} metadata"):
-            video = os.listdir(video_path)
-            video_lengths.append(len(video))
+            vr = VideoReader(video_path, num_threads=1)
+            video_lengths.append(len(vr))
 
         metadata = {
             "video_paths": video_paths,
@@ -79,18 +82,9 @@ class TaichiBaseVideoDataset(BaseVideoDataset):
             end_frame = self.video_length(video_metadata)
 
         video_path = video_metadata["video_paths"]
-        # list dir and sort by frame number
-        frame_files = sorted(
-            os.listdir(video_path),
-            key=lambda x: int(x.split('.')[0])  # assuming filenames are like '0001.png'
-        )
-        video = []
-        for frame_file in frame_files[start_frame:end_frame]:
-            frame_path = os.path.join(video_path, frame_file)
-            frame = np.array(cv2.cvtColor(cv2.imread(frame_path), cv2.COLOR_BGR2RGB))
-            video.append(frame)
-        video = np.stack(video, axis=0)
-        return torch.from_numpy(video).permute(0, 3, 1, 2) / 255.0
+        reader = VideoReader(video_path)
+        video = reader.get_batch(range(start_frame, end_frame)).asnumpy()
+        return rearrange(torch.from_numpy(video), "t h w c -> t c h w").to(torch.float32) / 255.0
     
     def load_cond(
         self, video_metadata: Dict[str, Any], start_frame: int, end_frame: int

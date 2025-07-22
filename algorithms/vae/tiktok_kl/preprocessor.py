@@ -75,7 +75,7 @@ class Titok_KLPreprocessor(BasePytorchAlgo):
         videos = self._rearrange_and_normalize(videos)
         # Encode the video data into a latent space
         # always convert to float16 (as they will be saved as float16 tensors)
-        latents = self._encode_videos(videos)
+        latents = self._encode_videos(videos) # (B*T, C, H, W)
         # just to see the progress in wandb
         if batch_idx % 1000 == 0:
             self.log("dummy", 0.0)
@@ -102,7 +102,15 @@ class Titok_KLPreprocessor(BasePytorchAlgo):
             )
 
         # save the latent to disk
-        latents_to_save = latents.detach().cpu()
+        latents_to_save = (
+            rearrange(
+                latents,
+                "(b f) c h w -> b f c h w",
+                b=batch_size,
+            )
+            .detach()
+            .cpu()
+        )
         for latent, latent_path in zip(latents_to_save, latent_paths):
             # should clone latent to avoid having large file size
             safe_torch_save(latent, latent_path)
@@ -124,11 +132,9 @@ class Titok_KLPreprocessor(BasePytorchAlgo):
         return torch.cat(latents, dim=0)
 
     def _rearrange_and_normalize(self, videos: torch.Tensor) -> torch.Tensor:
-        # videos = rearrange(videos, "b f c h w -> (b f) c h w")
-        # videos = 2.0 * videos - 1.0
+        videos = rearrange(videos, "b f c h w -> (b f) c h w")
         return videos
 
     def _rearrange_and_unnormalize(self, videos: torch.Tensor, batch_size: int) -> torch.Tensor:
-        # videos = 0.5 * videos + 0.5
-        # videos = rearrange(videos, "(b f) c h w -> b f c h w", b=batch_size)
+        videos = rearrange(videos, "(b f) c h w -> b f c h w", b=batch_size)
         return videos

@@ -17,7 +17,7 @@ import lightning.pytorch as pl
 from lightning.pytorch.utilities import grad_norm
 from .data_modules import BaseDataModule
 import warnings
-from algorithms import DFoTVideo, ReferenceDFoTVideo
+from algorithms import DFoTVideo
 from algorithms.common.metrics.video import VideoMetric, SharedVideoMetricModelRegistry
 from algorithms.common.ema import EMAModel
 from datasets.video import (
@@ -39,6 +39,8 @@ from torchsummary import summary
 from utils.torch_utils import freeze_model
 from utils.logging_utils import log_video
 from accelerate import Accelerator
+from accelerate.logging import get_logger
+from accelerate.utils import set_seed
 # from accelerate.utils.other import TORCH_SAFE_GLOBALS
 # import omegaconf
 
@@ -47,11 +49,12 @@ from accelerate import Accelerator
 from lightning.pytorch.callbacks import ModelSummary
 
 rank_zero_print = print
+logger = get_logger(__name__)
 
 class SimpleVideoGenerationExperiment:
     compatible_algorithms = dict(
         dfot_video=DFoTVideo,
-        reference_dfot_video=ReferenceDFoTVideo
+        # reference_dfot_video=ReferenceDFoTVideo
     )
     compatible_datasets=dict(
         # video datasets
@@ -82,8 +85,6 @@ class SimpleVideoGenerationExperiment:
             task for task in ["prediction", "interpolation"] \
             if self.cfg.algorithm.tasks[task].enabled 
         ]
-        self.data_module: BaseDataModule = self._build_data_module()
-        self.model: pl.LightningModule = self._build_algo()
         
         self.global_step = 0
 
@@ -145,6 +146,9 @@ class SimpleVideoGenerationExperiment:
         return BaseDataModule(self.cfg, self.compatible_datasets)
 
     def training(self) -> None:
+        self.model: pl.LightningModule = self._build_algo()
+
+        self.data_module: BaseDataModule = self._build_data_module()
         self.data_module.setup("fit")
         train_loader: DataLoader = self.data_module.train_dataloader()
         val_loader: DataLoader = self.data_module.val_dataloader()
@@ -152,24 +156,27 @@ class SimpleVideoGenerationExperiment:
         optimizer_cfg: Optimizer = self.model.configure_optimizers()
         lr_scheduler =  optimizer_cfg.pop("lr_scheduler", None)['scheduler']
         optimizer: Optimizer = optimizer_cfg.pop("optimizer", None)
-
         gradient_clip_val = self.cfg.experiment.training.optim.gradient_clip_val
 
         # accelerator
         accelerator = Accelerator(mixed_precision=self.cfg.experiment.training.precision)
-        accelerator.register_for_checkpointing(lr_scheduler)
+        # accelerator.register_for_checkpointing(lr_scheduler)
         device = accelerator.device
 
+        # Seed
+        if self.cfg.experiment.training.manual_seed is not None:
+            set_seed(self.cfg.experiment.training.manual_seed, device_specific=True)
+
         self.metrics = self._build_metrics(device=device)
-        self.model, optimizer, train_loader, val_loader = accelerator.prepare(
-            self.model, optimizer, train_loader, val_loader
+        self.model, optimizer, train_loader, val_loader, lr_scheduler = accelerator.prepare(
+            self.model, optimizer, train_loader, val_loader, lr_scheduler
         )
-        train_yielder = make_data_yielder(train_loader)
+        train_yielder = make_infinite_loader(train_loader)
 
         # EMA after model and optimizer are prepared
         self._build_ema_model()
         if self.ema:
-            rank_zero_print("Using EMA model with decay:", self.cfg.experiment.ema.decay)
+            logger.info("Using EMA model with decay:", self.cfg.experiment.ema.decay)
 
         # frequency
         # logging
@@ -189,33 +196,34 @@ class SimpleVideoGenerationExperiment:
         params = self.model.get_params()
 
         start_time = time.time()
-        rank_zero_print("********** Starting training... **********")
-        rank_zero_print("Configuration:", self.cfg)
-        rank_zero_print("Model:", self.model)
+        logger.info("********** Starting training... **********")
+        logger.info(f"  Configuration: {self.cfg}")
+        logger.info(f"  Model: {self.model}")
         # Log parameters
         for p in params['trainable']:
-            rank_zero_print(f"Trainable parameter: {p}")
+            logger.info(f"  Trainable parameter: {p}")
         for p in params['frozen']:
-            rank_zero_print(f"Frozen parameter: {p}")
+            logger.info(f"  Frozen parameter: {p}")
 
-        rank_zero_print("Total trainable parameters:", params['total_trainable']/ 1e6, "M")
-        rank_zero_print("Total frozen parameters:", params['total_frozen'] / 1e6, "M")
-        rank_zero_print("Total parameters:", params['total'] / 1e6, "M")
+        logger.info(f"  Total trainable parameters: {params['total_trainable']/ 1e6} M")
+        logger.info(f"  Total frozen parameters: {params['total_frozen'] / 1e6} M")
+        logger.info(f"  Total parameters: {params['total'] / 1e6} M")
 
-        rank_zero_print("Optimizer:", optimizer)
-        rank_zero_print(f"Using device: {device}")
+        logger.info(f"  Optimizer: {optimizer}")
+        logger.info(f"  Using device: {device}")
         if lr_scheduler:
-            rank_zero_print("Learning Rate Scheduler:", lr_scheduler)
-        rank_zero_print("Dataset:", self.data_module.root_cfg.dataset._name)
-        rank_zero_print("Num training steps:", self.cfg.experiment.training.max_steps)
-        rank_zero_print("Num examples:", len(train_loader.dataset))
-        rank_zero_print("Num batches:", len(train_loader))
+            logger.info(f"  Learning Rate Scheduler {lr_scheduler}")
+        logger.info(f"  Dataset: {self.data_module.root_cfg.dataset._name}")
+        logger.info(f"  Num training steps {self.cfg.experiment.training.max_steps}")
+        logger.info(f"  Num examples: {len(train_loader.dataset)}")
+        logger.info(f"  Num batches: {len(train_loader)}")
+        logger.info(f"  Gradient clipping value: {gradient_clip_val}")
 
         self.global_step = 1
         if self.ckpt_path:
-            rank_zero_print(f"Resuming from checkpoint: {self.ckpt_path}")
+            logger.info(f"Resuming from checkpoint: {self.ckpt_path}")
             self.global_step = self.resume_checkpoint(accelerator, self.ckpt_path)
-            rank_zero_print(f"Resumed global step: {self.global_step}")
+            logger.info(f"Resumed global step: {self.global_step}")
 
         while self.global_step < self.cfg.experiment.training.max_steps+1:
             self.model.train()
@@ -232,11 +240,10 @@ class SimpleVideoGenerationExperiment:
 
             # Log loss and lr
             if log_loss_freq and self.global_step % log_loss_freq == 0:
-                 if self.logger:
+                if self.logger:
                     self.logger.log_metrics({"training/loss": loss}, step=self.global_step)
                     self.logger.log_metrics({"training/lr": optimizer.param_groups[0]["lr"]}, step=self.global_step)
-                 rank_zero_print(f"Step: {self.global_step}, eta: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}, "
-                                 f"loss: {loss.item():.4f}, lr: {optimizer.param_groups[0]['lr']:.6f}")
+                logger.info(f"Step: {self.global_step}, eta: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}, "f"loss: {loss.item():.4f}, lr: {optimizer.param_groups[0]['lr']:.6f}")
 
             # Log max gradient norm before clipping
             if accelerator.is_main_process and log_grad_norm_freq and self.global_step % log_grad_norm_freq == 0:
@@ -247,7 +254,7 @@ class SimpleVideoGenerationExperiment:
                         max_grad_norm = max(max_grad_norm, v_grad_norm)
                 if self.logger:
                     self.logger.log_metrics({"training/max_grad_norm": max_grad_norm}, step=self.global_step)
-                rank_zero_print(f"Step: {self.global_step}, max_grad_norm: {max_grad_norm:.4f}")
+                logger.info(f"Step: {self.global_step}, max_grad_norm: {max_grad_norm:.4f}")
 
             # Clip gradients if specified
             if gradient_clip_val is not None and accelerator.sync_gradients:
@@ -272,7 +279,7 @@ class SimpleVideoGenerationExperiment:
                 if val_freq and self.global_step % val_freq == 0:
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
-                        self._validate(val_loader, accelerator)
+                        self.run_validation(val_loader, accelerator)
 
                 # Save checkpoints
                 if checkpointing_freq and self.global_step % checkpointing_freq == 0:
@@ -281,45 +288,47 @@ class SimpleVideoGenerationExperiment:
                 self.global_step += 1
 
     def validation(self):
+        """Run validation step for the experiment.
+            Pass ema checkpoint if you want to use EMA model for validation.
+            If you want to use the model from the checkpoint, pass the path to the checkpoint.
+        """
         assert self.ckpt_path, "Checkpoint path must be provided for validation."
-
+        self.model: pl.LightningModule = self._build_algo()
+        self.data_module: BaseDataModule = self._build_data_module()
         self.data_module.setup("validate")
         val_loader: DataLoader = self.data_module.val_dataloader()
 
-        optimizer_cfg: Optimizer = self.model.configure_optimizers()
-        lr_scheduler =  optimizer_cfg.pop("lr_scheduler", None)['scheduler']
-
         # accelerator
         accelerator = Accelerator(mixed_precision=self.cfg.experiment.training.precision)
-        accelerator.register_for_checkpointing(lr_scheduler)
         device = accelerator.device
 
+        # Seed
+        if self.cfg.experiment.validation.manual_seed is not None:
+            set_seed(self.cfg.experiment.validation.manual_seed, device_specific=True)
+
         self.metrics = self._build_metrics(device=device)
+        self.resume_checkpoint(accelerator, self.ckpt_path)
         self.model, val_loader = accelerator.prepare(self.model, val_loader)
 
-        # EMA after model and optimizer are prepared
-        # check if EMA checkpoint exists
-        if Path(os.path.join(self.ckpt_path, "ema.safetensors")).exists():
-            self._build_ema_model()
-        self.resume_checkpoint(accelerator, self.ckpt_path, False)
-        self._validate(val_loader, accelerator)
+        logger.info(f"Sampling step: {self.cfg.algorithm.diffusion.sampling_timesteps}")
+        logger.info(f"Scheduling matrix: {self.cfg.algorithm.scheduling_matrix}")
+        self.run_validation(val_loader, accelerator)
         
 
-    def _validate(self, val_loader, accelerator, namespace='validation') -> None:
+    def run_validation(self, val_loader, accelerator, validate_ema=True, namespace='validation') -> None:
         # Load EMA if enabled
+        val_yielder = make_infinite_loader(val_loader)
         model = accelerator.unwrap_model(self.model)
-        if self.ema:
+        if validate_ema and self.ema:
             self.ema.store(model)
             self.ema.copy_to(model)
-
-        val_yielder = make_data_yielder(val_loader)
 
         # Load required components for validation
         model.new_on_validation_epoch_start()
         num_validate_batches = min(len(val_loader), self.cfg.experiment.validation.limit_batch)
 
-        rank_zero_print("\n********** Starting validation... **********")
-        rank_zero_print("Num batches:", num_validate_batches)
+        logger.info("********** Starting validation... **********")
+        logger.info(f"Num batches: {num_validate_batches}")
 
         model.eval()
         with torch.no_grad():
@@ -346,8 +355,9 @@ class SimpleVideoGenerationExperiment:
                         logger=self.logger.experiment,
                         indent=self.num_logged_videos,
                         captions="denoised | gt",
+                        resize_to=(64, 64),
                     )
-    
+
                 # Log samples
                 if self.logger:
                     self.log_videos(all_videos, namespace=namespace, context_frames=model.n_context_frames, global_step=i)
@@ -360,14 +370,14 @@ class SimpleVideoGenerationExperiment:
         if accelerator.is_main_process:
             # Log average loss
             avg_loss = total_loss / num_validate_batches
-            rank_zero_print(f"Validation average loss: {avg_loss:.4f}")
+            logger.info(f"Validation average loss: {avg_loss:.4f}")
             if self.logger:
                 self.logger.log_metrics({f"{namespace}/avg_loss": avg_loss}, step=self.global_step)
             
             # compute metrics
             for task in self.tasks:
                 result = self.metrics[task].log(task)
-                rank_zero_print(f"Validation {task} metrics:")
+                logger.info(f"Validation {task} metrics:")
                 # Log metrics
                 self.log_dict(result, namespace, is_print=True)
 
@@ -379,11 +389,11 @@ class SimpleVideoGenerationExperiment:
         model.train()
 
         # Restore EMA if it was used
-        if self.ema:
+        if validate_ema and self.ema:
             # Restore original model parameters
             self.ema.restore(model)
 
-        rank_zero_print("********** Validation completed **********\n")
+        logger.info("********** Validation completed **********\n")
 
     def update_metrics(self, all_videos) -> None:
         gt_videos = all_videos["gt"]
@@ -407,7 +417,7 @@ class SimpleVideoGenerationExperiment:
         for key, value in dictionary.items():
             if is_print:
                 key = f"{namespace}/{key}" if namespace else key
-                rank_zero_print(f"{key}: {value:.4f}")
+                logger.info(f"{key}: {value:.4f}")
 
             if self.logger:
                 self.logger.log_metrics(
@@ -448,49 +458,39 @@ class SimpleVideoGenerationExperiment:
                 raw_dir=self.cfg.algorithm.logging.raw_dir,
                 context_frames=context_frames,
                 captions=f"{task} | gt",
+                resize_to=(64, 64)
             )
 
         self.num_logged_videos += batch_size
 
-    def resume_checkpoint(self, accelerator: Accelerator, ckpt_path: str, load_model_only=False) -> None:
+    def resume_checkpoint(self, accelerator: Accelerator, ckpt_path: str) -> None:
         if not ckpt_path or not Path(ckpt_path).exists():
-            rank_zero_print("No checkpoint found. Starting from scratch.")
+            logger.info("No checkpoint found. Starting from scratch.")
             return
 
-        rank_zero_print(f"Resuming from checkpoint: {ckpt_path}")
+        logger.info(f"Resuming from checkpoint: {ckpt_path}")
         # Load pytorch lightning state
-        if ckpt_path.endswith(".ckpt"):
-            state_dict = torch.load(ckpt_path, map_location=accelerator.device, weights_only=False)
-            # EMA
-            self.model.on_load_checkpoint(state_dict)
-            self.model = accelerator.unwrap_model(self.model)
-            self.model.load_state_dict(state_dict['state_dict'], strict=False)
-            self.model = accelerator.prepare(self.model)
-            return state_dict['global_step']
-        
-        # TODO: fix weights_only for safer
-        if load_model_only:
-            model_path = os.path.join(ckpt_path, "model.safetensors")
-            if not Path(model_path).exists():
-                raise FileNotFoundError(f"Model checkpoint not found at {model_path}.")
-            rank_zero_print(f"Loading model state from {model_path}")
-            # unwrap if necessary
-            self.model = accelerator.unwrap_model(self.model)
-            # load model state
-            self.model.load_state_dict(load_file(model_path), strict=True)
-            self.model = accelerator.prepare(self.model)
-        else:
+        if os.path.isdir(ckpt_path):
             accelerator.load_state(ckpt_path, load_kwargs={'weights_only': False})
             global_step = int(os.path.basename(ckpt_path).split('_')[1].split('.')[0])
             
             if self.ema:
                 ema_save_path = os.path.join(ckpt_path, "ema.safetensors")
                 if Path(ema_save_path).exists():
-                    rank_zero_print(f"Loading EMA state from {ema_save_path}")
+                    logger.info(f"Loading EMA state from {ema_save_path}")
                     self.ema.load_state_dict(load_file(ema_save_path))
                 else:
-                    rank_zero_print(f"No EMA state found at {ema_save_path}. Skipping EMA loading.")
+                    logger.info(f"No EMA state found at {ema_save_path}. Skipping EMA loading.")
             return global_step
+        # Only load model state if ckpt_path is a file
+        if ckpt_path.endswith(".ckpt"):
+            state_dict = torch.load(ckpt_path, map_location=accelerator.device, weights_only=False)['state_dict']
+        elif ckpt_path.endswith(".safetensors"):
+            state_dict = load_file(ckpt_path)
+        self.model = accelerator.unwrap_model(self.model)
+        self.model.load_state_dict(state_dict, strict=True)
+        self.model = accelerator.prepare(self.model)
+        return -1
 
     def save_checkpoint(self, global_step: int, accelerator: Accelerator, save_top_k=None) -> None:
         save_dir = os.path.join(hydra.core.hydra_config.HydraConfig.get()["runtime"]["output_dir"], "checkpoints")
@@ -505,20 +505,20 @@ class SimpleVideoGenerationExperiment:
                 num_to_remove = len(checkpoints) - save_top_k + 1
                 removing_checkpoints = checkpoints[0:num_to_remove]
 
-                rank_zero_print(f'{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints: {removing_checkpoints}')
+                logger.info(f'{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints: {removing_checkpoints}')
 
                 for removing_checkpoint in removing_checkpoints:
                     removing_checkpoint = os.path.join(save_dir, removing_checkpoint)
                     shutil.rmtree(removing_checkpoint)
 
-        rank_zero_print(f"Saving checkpoint to {save_path}")
+        logger.info(f"Saving checkpoint to {save_path}")
         accelerator.save_state(save_path)
 
         # Save the EMA state if applicable
         if self.ema:
             ema_save_path = os.path.join(save_path, "ema.safetensors")
             save_file(self.ema.state_dict(), ema_save_path)
-            rank_zero_print(f"EMA state saved to {ema_save_path}")
+            logger.info(f"EMA state saved to {ema_save_path}")
 
     def exec_task(self, task: str) -> None:
         """
@@ -539,7 +539,7 @@ class SimpleVideoGenerationExperiment:
             )
 
 
-def make_data_yielder(dataloader):
+def make_infinite_loader(dataloader):
     while True:
         for batch in dataloader:
             yield batch

@@ -3,7 +3,7 @@ import torch
 
 class EMAModel:
 
-    def __init__(self, model, decay):
+    def __init__(self, model: torch.nn.Module, decay):
         """
         Initialize the EMA object.
 
@@ -17,14 +17,16 @@ class EMAModel:
             for name, param in model.named_parameters()
         }
         self.original = None  # Stores the original parameters of the model
+        self.optimization_step = 0
 
-    def step(self, model):
+    def step(self, model: torch.nn.Module):
         """
         Update the EMA shadow variables with the current model parameters.
 
         Args:
         model (torch.nn.Module): The current model.
         """
+        self.optimization_step += 1
         for name, param in model.named_parameters():
             if param.requires_grad:
                 self.shadow[name].data = self.decay * self.shadow[name].data + (1.0 - self.decay) * param.data

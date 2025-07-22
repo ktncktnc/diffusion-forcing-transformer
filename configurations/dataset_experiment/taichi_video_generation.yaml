@@ -15,12 +15,14 @@ dataset:
   latent:
     enabled: True
     suffix: artitok_taichi500k
+    type: pre_artitok_taichi500k
 
 algorithm:
   latent_shape: [1, 32, 4] # fixed latent shape, if not null
   num_sanity_val_steps: 1
   lr_scheduler:
-    num_warmup_steps: 10000
+    num_warmup_steps: 500
+    num_training_steps: ${experiment.training.max_steps}
   weight_decay: 0
   backbone:
     patch_size: 1
@@ -30,35 +32,34 @@ algorithm:
   logging:
     n_metrics_frames: 16
     max_num_videos: 16
-    metrics: [vbench, fvd, is, fid, lpips, mse, ssim, psnr]
-  contrastive_clip_frames: 8
-  diffusion_clip_frames: 16
-  contrastive_loss_weight: 0.3
+    loss_freq: 50
+    grad_norm_freq: 50
+    metrics: [fvd, is, fid, lpips, mse, ssim, psnr]
   vae:
-    pretrained_path: /scratch/s224075134/temporal_diffusion/AR-Diffusion/vae_checkpoints/taichi_vae/ckpt_dir/checkpoint-500000/model.safetensors
-    batch_size: 16
+    pretrained_path: /scratch/s224075134/temporal_diffusion/AR-Diffusion/experiments/taichi_vae/ckpt_dir/checkpoint-500000/model.safetensors
+    batch_size: 4
 
 experiment:
   ema:
     enable: True
     decay: 0.999
   training:
-    max_steps: 500000
+    max_steps: 100000
     max_epochs: null
     lr: 1e-4
-    batch_size: 32
+    batch_size: 16
     data:
       num_workers: 11
       shuffle: True
     checkpointing:
-      every_n_train_steps: 25000
+      every_n_train_steps: 5000
       every_n_epochs: null
       save_last: True
-      save_top_k: 5
+      save_top_k: 20
       monitor: "prediction/fvd"
   validation:
-    batch_size: 32
-    val_every_n_step: 25000
+    batch_size: 16
+    val_every_n_step: 5000
     val_every_n_epoch: null
     data:
       num_workers: 1

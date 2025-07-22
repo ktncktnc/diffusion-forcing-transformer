@@ -10,8 +10,6 @@ from datasets.video import (
     DMLabAdvancedVideoDataset
 )
 from algorithms.dfot import DFoTVideo, DFoTVideoPose
-from algorithms.gibbs_sampling_dfot import GibbsDFoTVideo
-from algorithms.reference_dfot import ReferenceDFoTVideo
 from .base_exp import BaseLightningExperiment
 from .data_modules.utils import _data_module_cls
 
@@ -24,8 +22,6 @@ class VideoGenerationExperiment(BaseLightningExperiment):
     compatible_algorithms = dict(
         dfot_video=DFoTVideo,
         dfot_video_pose=DFoTVideoPose,
-        gibbs_dfot_video=GibbsDFoTVideo,
-        reference_dfot_video=ReferenceDFoTVideo,
         sd_video=DFoTVideo,
         sd_video_3d=DFoTVideoPose,
     )

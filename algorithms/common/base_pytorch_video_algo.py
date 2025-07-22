@@ -134,7 +134,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
             "masks": masks,
             "gt_videos": gt_videos,
         }
-    
+
     # ---------------------------------------------------------------------
     # Prepare Model, Optimizer, and Metrics
     # ---------------------------------------------------------------------
@@ -286,7 +286,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
         # return two outputs: denoising output and all_videos
         return denoising_output, all_videos
 
-    
 
     def _eval_denoising(self, batch, batch_idx, namespace="training") -> None:
         """Evaluate the denoising performance during training."""
@@ -354,6 +353,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
             logger=self.logger.experiment,
             indent=self.num_logged_videos,
             captions="denoised | gt",
+            resize_to=(64,64)
         )
     
     def _new_eval_denoising(self, batch, batch_idx, namespace="training") -> Dict[str, Tensor]:
@@ -406,27 +406,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
         output['recons'] = recons
         return output
 
-        # if not (
-        #     is_rank_zero
-        #     and self.logger
-        #     and self.num_logged_videos < self.logging.max_num_videos
-        # ):
-        #     return
-
-        # num_videos_to_log = min(
-        #     self.logging.max_num_videos - self.num_logged_videos,
-        #     gt_videos.shape[0],
-        # )
-        # log_video(
-        #     recons[:num_videos_to_log],
-        #     gt_videos[:num_videos_to_log],
-        #     step=self.global_step,
-        #     namespace=f"{namespace}_denoising_vis",
-        #     logger=self.logger.experiment,
-        #     indent=self.num_logged_videos,
-        #     captions="denoised | gt",
-        # )
-
     def on_validation_epoch_start(self) -> None:
         if self.cfg.logging.deterministic is not None:
             self.generator = torch.Generator(device=self.device).manual_seed(
@@ -444,10 +423,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
         self.validation_dataloader_idx = -1
 
     def new_on_validation_epoch_start(self) -> None:
-        if self.cfg.logging.deterministic is not None:
-            self.generator = torch.Generator(device=self.device).manual_seed(
-                self.cfg.logging.deterministic
-            )
         if self.is_latent_diffusion and not self.is_latent_online:
             self._load_vae()
         
@@ -455,7 +430,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
             register_hooks(self.diffusion_model.model, True)
 
         self.val_metrics = {}
-
         self.validation_dataloader_idx = -1
 
     def on_validation_dataloader_end(self) -> None:
@@ -528,74 +502,23 @@ class BaseVideoAlgo(BasePytorchAlgo):
     # ---------------------------------------------------------------------
     # Normalization Utils
     # ---------------------------------------------------------------------
-    # def _normalize_x(self, xs):
-    #     if self.is_latent_diffusion:
-    #         # Input is latent, scaled by vae scaling factor
-    #         shape = [1] * (xs.ndim - self.vae_mean.ndim) + list(self.vae_mean.shape)
-    #         mean = self.vae_mean.reshape(shape)
-    #         scaling_factor = self.vae_scaling_factor.reshape(shape)
-    #         xs = (xs - mean) * scaling_factor
-    #         return xs
-    #     else:
-    #         # Input is in range [0, 1], scaled to [-1, 1]
-    #         return xs * 2 - 1
-
-    # def _unnormalize_x(self, xs):
-    #     if self.is_latent_diffusion:
-    #         # Input is latent, scaled by vae scaling factor
-    #         shape = [1] * (xs.ndim - self.vae_mean.ndim) + list(self.vae_mean.shape)
-    #         mean = self.vae_mean.reshape(shape)
-    #         scaling_factor = self.vae_scaling_factor.reshape(shape)
-    #         return 1 / scaling_factor * xs + mean
-    #     else:
-    #         # Input is in range [-1, 1], scaled to [0, 1]
-    #         return (xs + 1) / 2
-
+    # scale factor
     def _normalize_x(self, xs):
         shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
         mean = self.data_mean.reshape(shape)
         std = self.data_std.reshape(shape)
         return (xs - mean) / std
 
+    # un-scale factor
     def _unnormalize_x(self, xs):
         shape = [1] * (xs.ndim - self.data_mean.ndim) + list(self.data_mean.shape)
         mean = self.data_mean.reshape(shape)
         std = self.data_std.reshape(shape)
         return xs * std + mean
-    
+
     # ---------------------------------------------------------------------
     # Latent
     # ---------------------------------------------------------------------
-    def _load_vae_scaling_factor(self) -> None:
-        """
-        Load VAE scaling factor and mean.
-        If specified in the config, use the values from cfg.latent.
-        If not specified, try to load from the VAE model.
-        """
-        if self.is_latent_diffusion:
-            if hasattr(self.cfg.latent, 'vae_scaling_factor'):
-                self.register_value(self.cfg.latent.vae_mean if hasattr(self.cfg.latent, 'vae_mean') else 0.0, 'vae_mean')
-                self.register_value(self.cfg.latent.vae_scaling_factor, 'vae_scaling_factor')
-
-            if (not hasattr(self, 'vae')) or (self.vae is None):
-                self._load_vae()
-            
-            try:
-                if hasattr(self.vae, 'scaling_factor'):
-                    vae_scaling_factor = self.vae.scaling_factor
-                else:
-                    vae_scaling_factor = self.vae.config.scaling_factor
-                self.register_value(0.0, 'vae_mean')
-                self.register_value(vae_scaling_factor, 'vae_scaling_factor')
-                
-            except AttributeError:
-                warnings.warn(
-                    "VAE does not have a scaling factor. "
-                    "Assuming scaling factor of 1.0."
-                )
-                self.vae_scaling_factor = 1.0
-            self.vae = None
-
     def _load_vae(self) -> None:
         """
         Load the pretrained VAE model.
@@ -666,15 +589,12 @@ class BaseVideoAlgo(BasePytorchAlgo):
         outputs = []
         for chunk in chunks:
             b = chunk.shape[0]
-            if isinstance(self.vae, TiTok_KL):
-                chunk = rearrange(chunk, "b c t h w -> b t c h w")
-            elif not self.is_latent_video_vae:
+            if not self.is_latent_video_vae:
                 chunk = rearrange(chunk, "b c t h w -> (b t) c h w")
 
             output = vae_fn(chunk)
-            if isinstance(self.vae, TiTok_KL):
-                output = rearrange(output, "b t c h w -> b c t h w")
-            elif not self.is_latent_video_vae:
+
+            if not self.is_latent_video_vae:
                 output = rearrange(output, "(b t) c h w -> b c t h w", b=b)
             outputs.append(output)
         return rearrange(torch.cat(outputs, 0), f"b c t h w -> {shape}")
@@ -704,23 +624,24 @@ class BaseVideoAlgo(BasePytorchAlgo):
                 lambda y: self.vae.decode(y, return_dict=False)[0] * 0.5 + 0.5
             )
         elif isinstance(self.vae, TiTok_KL):
+            # Output [0,1]
             return self._run_vae(
                 latents,
                 shape,
                 lambda y: self.vae.decode(y)
             )
-
-        return self._run_vae(
-            latents,
-            shape,
-            lambda y: (
-                self.vae.decode(y, self._n_tokens_to_n_frames(latents.shape[1]))
-                if self.is_latent_video_vae
-                else self.vae.decode(y)
+        else:
+            return self._run_vae(
+                latents,
+                shape,
+                lambda y: (
+                    self.vae.decode(y, self._n_tokens_to_n_frames(latents.shape[1]))
+                    if self.is_latent_video_vae
+                    else self.vae.decode(y)
+                )
+                * 0.5
+                + 0.5,
             )
-            * 0.5
-            + 0.5,
-        )
     
     # ---------------------------------------------------------------------
     # Data Preprocessing Utils
@@ -749,6 +670,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
                 return conditions
             case "mask_first":
                 mask = torch.ones_like(conditions)
+                # Remove the first token from the conditions
                 mask[:, :1, : self.external_cond_dim] = 0
                 return conditions * mask
             case _:
@@ -861,6 +783,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
                 raw_dir=self.logging.raw_dir,
                 context_frames=context_frames,
                 captions=f"{task} | gt",
+                resize_to=(64,64)
             )
 
         self.num_logged_videos += batch_size

@@ -67,7 +67,6 @@ class DFoTVideo(BaseVideoAlgo):
             pass
 
         xs, xs_pred = map(self._unnormalize_x, (xs, xs_pred))
-
         output_dict = {
             "loss": loss,
             "xs_pred": xs_pred,
@@ -359,169 +358,6 @@ class DFoTVideo(BaseVideoAlgo):
         pbar.close()
         return xs
 
-    # ---------------------------------------------------------------------
-    # Training Utils
-    # ---------------------------------------------------------------------
-
-    # def _get_training_noise_levels(
-    #     self, xs: Tensor, masks: Tensor = None
-    # ) -> Tuple[Tensor, Tensor]:
-    #     """Generate random noise levels for training."""
-    #     batch_size, n_tokens, *_ = xs.shape
-
-    #     # random function different for continuous and discrete diffusion
-    #     rand_fn = partial(
-    #         *(
-    #             (torch.rand,)
-    #             if self.cfg.diffusion.is_continuous
-    #             else (torch.randint, 0, self.timesteps)
-    #         ),
-    #         device=xs.device,
-    #         generator=self.generator,
-    #     )
-
-    #     # baseline training (SD: fixed_context, BD: variable_context)
-    #     context_mask = None
-    #     if self.cfg.variable_context.enabled:
-    #         assert (
-    #             not self.cfg.fixed_context.enabled
-    #         ), "Cannot use both fixed and variable context"
-    #         context_mask = bernoulli_tensor(
-    #             (batch_size, n_tokens),
-    #             self.cfg.variable_context.prob,
-    #             device=self.device,
-    #             generator=self.generator,
-    #         ).bool()
-    #     elif self.cfg.fixed_context.enabled:
-    #         context_indices = self.cfg.fixed_context.indices or list(
-    #             range(self.n_context_tokens)
-    #         )
-    #         context_mask = torch.zeros(
-    #             (batch_size, n_tokens), dtype=torch.bool, device=xs.device
-    #         )
-    #         context_mask[:, context_indices] = True
-
-    #     match self.cfg.noise_level:
-    #         case "random_independent":  # independent noise levels (Diffusion Forcing)
-    #             noise_levels = rand_fn((batch_size, n_tokens))
-    #         case "random_uniform":  # uniform noise levels (Typical Video Diffusion)
-    #             noise_levels = rand_fn((batch_size, 1)).repeat(1, n_tokens)
-
-    #     if self.cfg.uniform_future.enabled:  # simplified training (Appendix A.5)
-    #         noise_levels[:, self.n_context_tokens :] = rand_fn((batch_size, 1)).repeat(
-    #             1, n_tokens - self.n_context_tokens
-    #         )
-
-    #     # treat frames that are not available as "full noise"
-    #     noise_levels = torch.where(
-    #         reduce(masks.bool(), "b t ... -> b t", torch.any),
-    #         noise_levels,
-    #         torch.full_like(
-    #             noise_levels,
-    #             1 if self.cfg.diffusion.is_continuous else self.timesteps - 1,
-    #         ),
-    #     )
-
-    #     if context_mask is not None:
-    #         # binary dropout training to enable guidance
-    #         dropout = (
-    #             (
-    #                 self.cfg.variable_context
-    #                 if self.cfg.variable_context.enabled
-    #                 else self.cfg.fixed_context
-    #             ).dropout
-    #             if self.trainer.training
-    #             else 0.0
-    #         )
-    #         context_noise_levels = bernoulli_tensor(
-    #             (batch_size, 1),
-    #             dropout,
-    #             device=xs.device,
-    #             generator=self.generator,
-    #         )
-    #         if not self.cfg.diffusion.is_continuous:
-    #             context_noise_levels = context_noise_levels.long() * (
-    #                 self.timesteps - 1
-    #             )
-    #         noise_levels = torch.where(context_mask, context_noise_levels, noise_levels)
-
-    #         # modify masks to exclude context frames from loss computation
-    #         context_mask = rearrange(
-    #             context_mask, "b t -> b t" + " 1" * len(masks.shape[2:])
-    #         )
-    #         masks = torch.where(context_mask, False, masks)
-
-    #     return noise_levels, masks
-
-
-    # ---------------------------------------------------------------------
-    # Sampling Utils
-    # ---------------------------------------------------------------------
-
-    # def _generate_scheduling_matrix(
-    #     self,
-    #     horizon: int,
-    #     padding: int = 0,
-    # ):
-    #     match self.cfg.scheduling_matrix:
-    #         case "full_sequence" | "gibbs":
-    #             scheduling_matrix = np.arange(self.sampling_timesteps, -1, -1)[
-    #                 :, None
-    #             ].repeat(horizon, axis=1)
-    #         case "autoregressive":
-    #             scheduling_matrix = self._generate_pyramid_scheduling_matrix(
-    #                 horizon, self.sampling_timesteps
-    #             )
-
-    #     scheduling_matrix = torch.from_numpy(scheduling_matrix).long()
-
-    #     scheduling_matrix = self.diffusion_model.ddim_idx_to_noise_level(
-    #         scheduling_matrix
-    #     )
-
-    #     if self.cfg.scheduling_matrix == "gibbs":
-    #         n_sampling_steps = scheduling_matrix.shape[0]
-    #         scheduling_matrix = repeat(scheduling_matrix, 't b -> (t h) b', h=horizon)
-    #         for i in range(1, n_sampling_steps):
-    #             for j in range(horizon):
-    #                 scheduling_matrix[i * horizon + j, j+1:] = scheduling_matrix[(i-1) * horizon + horizon - 1, j+1:]
-
-    #     # paded entries are labeled as pure noise
-    #     scheduling_matrix = F.pad(
-    #         scheduling_matrix, (0, padding, 0, 0), value=self.timesteps - 1
-    #     )
-
-    #     return scheduling_matrix
-    
-    def _generate_refine_scheduling_matrix(
-        self,
-        horizon: int,
-        goback_length: int,
-        n_goback: int,
-        padding: int = 0,
-    ):
-        assert self.cfg.scheduling_matrix == 'full_sequence', "Refining only support full_sequence scheduling matrix"
-        scheduling_matrix = np.arange(self.sampling_timesteps, -1, -1)
-        final_scheduling_matrix = []
-
-        goback_idxs = [i for i in range(1, self.sampling_timesteps - goback_length, goback_length)]
-        for t in scheduling_matrix:
-            final_scheduling_matrix.append(t)
-            if t in goback_idxs:
-                for i in range(n_goback):
-                    final_scheduling_matrix = final_scheduling_matrix + [s for s in range(t+1,t+goback_length+1)]
-                    final_scheduling_matrix = final_scheduling_matrix + [s for s in range(t+goback_length-1,t-1,-1)]
-        
-        final_scheduling_matrix = torch.tensor(final_scheduling_matrix).long()
-        scheduling_matrix = self.diffusion_model.ddim_idx_to_noise_level(final_scheduling_matrix)[:, None].repeat(1, horizon)
-        
-        # paded entries are labeled as pure noise
-        scheduling_matrix = F.pad(
-            scheduling_matrix, (0, padding, 0, 0), value=self.timesteps - 1
-        )
-
-        return scheduling_matrix
-
     def _predict_sequence(
         self,
         context: torch.Tensor,
@@ -751,15 +587,15 @@ class DFoTVideo(BaseVideoAlgo):
             if context.shape[:2] != context_mask.shape:
                 raise ValueError("context and context_mask must have the same shape.")
 
-        # if conditions is not None:
-        #     if self.use_causal_mask and conditions.shape[1] != length:
-        #         raise ValueError(
-        #             f"for causal models, conditions length is expected to be {length}, got {conditions.shape[1]}."
-        #         )
-        #     elif not self.use_causal_mask and conditions.shape[1] != self.max_tokens:
-        #         raise ValueError(
-        #             f"for noncausal models, conditions length is expected to be {self.max_tokens}, got {conditions.shape[1]}."
-        #         )
+        if conditions is not None:
+            if self.use_causal_mask and conditions.shape[1] != length:
+                raise ValueError(
+                    f"for causal models, conditions length is expected to be {length}, got {conditions.shape[1]}."
+                )
+            elif not self.use_causal_mask and conditions.shape[1] != self.max_tokens:
+                raise ValueError(
+                    f"for noncausal models, conditions length is expected to be {self.max_tokens}, got {conditions.shape[1]}."
+                )
 
         horizon = length if self.use_causal_mask else self.max_tokens
         padding = horizon - length

@@ -28,6 +28,7 @@ training:
     every_n_epochs: null # mutually exclusive with ``every_n_train_steps`` and ``train_time_interval``
     train_time_interval: null # in format of "00:12:00:00", mutually exclusive with ``every_n_train_steps`` and ``every_n_epochs``.
     enable_version_counter: False # If this is ``False``, later checkpoint will be overwrite previous ones.
+  manual_seed: 0
 
 validation:
   precision: bf16
@@ -41,6 +42,7 @@ validation:
     num_workers: 8 # number of CPU threads for data preprocessing, for validation.
     shuffle: False # whether validation data will be shuffled
   inference_mode: True
+  manual_seed: 0
 
 test:
   precision: bf16
@@ -51,6 +53,7 @@ test:
     num_workers: 8 # number of CPU threads for data preprocessing, for test.
     shuffle: False # whether test data will be shuffled
   inference_mode: True
+  manual_seed: 0
 
 find_unused_parameters: False
 reload_dataloaders_every_n_epochs: 0

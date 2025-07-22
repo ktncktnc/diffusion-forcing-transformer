@@ -10,7 +10,7 @@ dataset:
     suffix: artitok_taichi500k # 1cd9pgpb
 
 algorithm:
-  pretrained_path: /scratch/s224075134/temporal_diffusion/AR-Diffusion/vae_checkpoints/taichi_vae/ckpt_dir/checkpoint-500000/model.safetensors
+  pretrained_path: /scratch/s224075134/temporal_diffusion/AR-Diffusion/experiments/taichi_vae/ckpt_dir/checkpoint-500000/model.safetensors
 
 experiment:
   batch_size: 1

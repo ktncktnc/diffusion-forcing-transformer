@@ -1,0 +1,10 @@
+name: dit1d 
+hidden_size: 1152
+depth: 28
+num_heads: 16
+mlp_ratio: 4
+learn_sigma: False
+merge_mode: share_norm
+causal_attn_mode: video_temporal_causal
+use_rotary_emb: False
+qk_norm: False

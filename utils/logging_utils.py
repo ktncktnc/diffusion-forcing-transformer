@@ -23,6 +23,21 @@ from torchmetrics.image import (
     FrechetInceptionDistance,
 )
 
+from skimage.transform import resize
+import numpy as np
+
+def resize_video_skimage(video_array, new_height, new_width):
+    # video_array shape: (T, H, W, C)
+    num_frames = video_array.shape[0]
+    resized = np.zeros((num_frames, new_height, new_width, video_array.shape[3]))
+    
+    for i in range(num_frames):
+        resized[i] = resize(video_array[i], (new_height, new_width), 
+                           anti_aliasing=True, preserve_range=True)
+    
+    return resized.astype(video_array.dtype)
+
+
 
 # FIXME: clean up & check this util
 def log_video(
@@ -39,6 +54,7 @@ def log_video(
     logger=None,
     n_frames=None,
     raw_dir=None,
+    resize_to=None
 ):
     """
     take in video tensors in range [-1, 1] and log into wandb
@@ -103,11 +119,30 @@ def log_video(
         observation_gt[:, :, i, :, [0, -1]] = c
     video = torch.cat([*observation_hats, observation_gt], -1).detach().cpu().numpy()
 
+    # # reshape to h=64
+    # if video.shape[-2] != 64:
+        
+
     # reshape to original shape
     if n_frames is not None:
         video = rearrange(
             video, "(b n) t c h w -> b (n t) c h w", n=n_frames // video.shape[1]
         )
+
+    if resize_to is not None:
+        assert isinstance(resize_to, (int, tuple))
+        if isinstance(resize_to, int):
+            resize_to = (resize_to, resize_to)
+        resize_to = list(resize_to)
+        resize_to[1] = int(resize_to[0]*video.shape[-1] // video.shape[-2])
+
+        resize_video = []
+        for v in video:
+            v = v.transpose(0, 2, 3, 1)
+            v = resize_video_skimage(v, *resize_to)
+            resize_video.append(v)
+        video = np.stack(resize_video, axis=0)
+        video = video.transpose(0, 1, 4, 2, 3)
 
     video = (np.clip(video, a_min=0.0, a_max=1.0) * 255).astype(np.uint8)
     # video[..., 1:] = video[..., :1]  # remove framestack, only visualize current frame

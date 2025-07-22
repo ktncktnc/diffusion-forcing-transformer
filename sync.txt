@@ -1,5 +1,9 @@
 rsync -a outputs s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage/projects/temporal_diffusion/diffusion-forcing-transformer --info=progress
 
+
+s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage2/projects/temporal_diffusion/dataset/video --info=progress
+
+
 rsync s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage2/projects/temporal_diffusion/diffusion-forcing-transformer/outputs/dmlab_2025-06-20_15-47-20.tar .
 
 rsync -a minecraft_latent_32_1cd9pgpb.zip s224075134@rds-storage.deakin.edu.au:/RDS/RDS75807-temporal-diffusion/storage/projects/temporal_diffusion/datasets/video
@@ -151,4 +155,10 @@ python -m main +name=EVAL_DFOT_DMLAB_16_RI dataset=dmlab algorithm=dfot_video ex
 
 
 
-python -m main +name=EVAL_DFOT_DMLAB_16_RU dataset=dmlab algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-06-09/14-53-28/checkpoints/epoch\=0-step\=500000.ckpt" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=4 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=1 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled algorithm.diffusion.sampling_timesteps=25
+python -m main +name=EVAL_DFOT_DMLAB_16_RU dataset=dmlab algorithm=dfot_video experiment=video_generation "++algorithm={backbone: {depth: 12, hidden_size: 768, num_heads: 12}}" "load=/home/s224075134/diffusion-forcing-transformer/outputs/outputs/video_generation/training/dmlab/dfot_video/2025-07-02/04-39-27/checkpoints/checkpoint_500000/model.safetensors" experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=50 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled algorithm.diffusion.sampling_timesteps=50
+
+
+python -m main '+name=DFOT_FacMat-S_DMLAB_16_RU' 'dataset=dmlab' 'algorithm=dfot_video' 'experiment=video_generation' 'dataset.max_frames=16' 'experiment.training.batch_size=32' 'experiment.validation.batch_size=32' 'algorithm.noise_level=random_uniform' 'algorithm.variable_context.enabled=True' 'algorithm/backbone=dit3d_factorized_matrix' '@FacMatDiT/S'
+
+
+python -m main '+name=EVAL_DFOT_DiT-B_TAICHI_16_RU' 'dataset=taichi' 'algorithm=dfot_video' 'experiment=video_generation' 'dataset.max_frames=16' 'experiment.training.batch_size=32' 'experiment.validation.batch_size=32' 'algorithm.noise_level=random_uniform' 'algorithm.variable_context.enabled=True' 'algorithm/backbone=dit3d' '@DiT/B' 'algorithm.backbone.patch_size=1' experiment.tasks=[validation] experiment.validation.data.shuffle=False dataset.context_length=4 dataset.frame_skip=1 dataset.n_frames=16 experiment.validation.batch_size=16 algorithm.tasks.prediction.history_guidance.name=conditional experiment.validation.limit_batch=50 experiment.validation.validate_training_set=False experiment.validation.validate_history_free=False wandb.mode=disabled algorithm.diffusion.sampling_timesteps=50 load=/scratch/s224075134/temporal_diffusion/diffusion-forcing-transformer/outputs/video_generation/training/taichi/dfot_video/2025-07-16/01-12-10/checkpoints/checkpoint_500000/model.safetensors

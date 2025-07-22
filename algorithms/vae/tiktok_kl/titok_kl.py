@@ -76,8 +76,17 @@ class TiTok_KL(nn.Module):
             module.weight.data.fill_(1.0)
 
     def encode(self, x, sample=False, sample_posterior=False):
+        """ Encode the input video data into latent space.
+            :param:
+                x -> torch.Tensor: input video data of shape [B, T, C, H, W]
+                sample -> bool: whether to sample from the posterior distribution
+                sample_posterior -> bool: whether to sample from the posterior distribution
+            :return:
+                z -> torch.Tensor: encoded latent representation of shape [B, T, num_latent_tokens, width]
+        """
         B, T = x.shape[:2]
-        x = rearrange(x, 'b t ... -> (b t) ...')
+        # if x.dim() == 5:
+        #     x = rearrange(x, 'b t c h w -> (b t) c h w')
         moments = self.encoder(pixel_values=x, latent_tokens=self.latent_tokens)
         posterior = DiagonalGaussianDistribution(moments)
         if sample:
@@ -85,19 +94,18 @@ class TiTok_KL(nn.Module):
                 z = posterior.sample()
             else:
                 z = posterior.mode()
-            z = rearrange(z, '(b t) ... -> b t ...', b=B, t=T)
             return z
         return posterior
     
     def decode(self, z):
         B, T =  z.shape[:2]
-        z = rearrange(z, 'b t ... -> (b t) ...')
+        # z = rearrange(z, 'b t ... -> (b t) ...')
         if self.use_l2_norm:
             z = torch.nn.functional.normalize(z, dim=1)
         decoded_latent = self.decoder(z)
         latent = self.pixel_quantize_conv(decoded_latent.softmax(1))
         decoded = self.pixel_decoder(latent)
-        decoded = rearrange(decoded, '(b t) ... -> b t ...', b=B, t=T)
+        # decoded = rearrange(decoded, '(b t) ... -> b t ...', b=B, t=T)
         return decoded
 
     def forward(self, x, sample_posterior, return_loss=True):
