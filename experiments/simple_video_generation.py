@@ -17,7 +17,7 @@ import lightning.pytorch as pl
 from lightning.pytorch.utilities import grad_norm
 from .data_modules import BaseDataModule
 import warnings
-from algorithms import DFoTVideo
+from algorithms import DFoTVideo, DifferenceDFoTVideo
 from algorithms.common.metrics.video import VideoMetric, SharedVideoMetricModelRegistry
 from algorithms.common.ema import EMAModel
 from datasets.video import (
@@ -38,7 +38,7 @@ from torchsummary import summary
 
 from utils.torch_utils import freeze_model
 from utils.logging_utils import log_video
-from accelerate import Accelerator
+from accelerate import Accelerator, PartialState, DistributedDataParallelKwargs
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 # from accelerate.utils.other import TORCH_SAFE_GLOBALS
@@ -54,6 +54,7 @@ logger = get_logger(__name__)
 class SimpleVideoGenerationExperiment:
     compatible_algorithms = dict(
         dfot_video=DFoTVideo,
+        difference_dfot_video=DifferenceDFoTVideo,
         # reference_dfot_video=ReferenceDFoTVideo
     )
     compatible_datasets=dict(
@@ -146,6 +147,13 @@ class SimpleVideoGenerationExperiment:
         return BaseDataModule(self.cfg, self.compatible_datasets)
 
     def training(self) -> None:
+        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+        accelerator = Accelerator(
+            mixed_precision=self.cfg.experiment.training.precision,
+            kwargs_handlers=[ddp_kwargs]
+        )
+        logger.info(f"  Configuration: {self.cfg}")
+
         self.model: pl.LightningModule = self._build_algo()
 
         self.data_module: BaseDataModule = self._build_data_module()
@@ -159,8 +167,6 @@ class SimpleVideoGenerationExperiment:
         gradient_clip_val = self.cfg.experiment.training.optim.gradient_clip_val
 
         # accelerator
-        accelerator = Accelerator(mixed_precision=self.cfg.experiment.training.precision)
-        # accelerator.register_for_checkpointing(lr_scheduler)
         device = accelerator.device
 
         # Seed
@@ -176,7 +182,7 @@ class SimpleVideoGenerationExperiment:
         # EMA after model and optimizer are prepared
         self._build_ema_model()
         if self.ema:
-            logger.info("Using EMA model with decay:", self.cfg.experiment.ema.decay)
+            logger.info(f"Using EMA model with decay: {self.cfg.experiment.ema.decay}")
 
         # frequency
         # logging
@@ -197,7 +203,6 @@ class SimpleVideoGenerationExperiment:
 
         start_time = time.time()
         logger.info("********** Starting training... **********")
-        logger.info(f"  Configuration: {self.cfg}")
         logger.info(f"  Model: {self.model}")
         # Log parameters
         for p in params['trainable']:
@@ -208,9 +213,21 @@ class SimpleVideoGenerationExperiment:
         logger.info(f"  Total trainable parameters: {params['total_trainable']/ 1e6} M")
         logger.info(f"  Total frozen parameters: {params['total_frozen'] / 1e6} M")
         logger.info(f"  Total parameters: {params['total'] / 1e6} M")
+        logger.info(f'  Model x_shape: {self.model.x_shape}')
+        logger.info(f"  Model max_tokens: {self.model.max_tokens}")
+        logger.info(f"  Model external_cond_type: {self.model.external_cond_type}")
+        logger.info(f"  Model external_cond_num_classes: {self.model.external_cond_num_classes}")
+        logger.info(f"  Model external_cond_dim: {self.model.external_cond_dim}")
+
+        state = PartialState()
+        logger.info(f"  Distributed type: {state.distributed_type}")
+        logger.info(f"  Number of processes: {state.num_processes}")
+        logger.info(f"  Local process index: {state.local_process_index}")
 
         logger.info(f"  Optimizer: {optimizer}")
+        logger.info(f"  Using {accelerator.num_processes} GPUs")
         logger.info(f"  Using device: {device}")
+
         if lr_scheduler:
             logger.info(f"  Learning Rate Scheduler {lr_scheduler}")
         logger.info(f"  Dataset: {self.data_module.root_cfg.dataset._name}")
@@ -241,7 +258,12 @@ class SimpleVideoGenerationExperiment:
             # Log loss and lr
             if log_loss_freq and self.global_step % log_loss_freq == 0:
                 if self.logger:
-                    self.logger.log_metrics({"training/loss": loss}, step=self.global_step)
+                    log_loss_dict = {'training/loss': loss.item()}
+                    if 'diff_loss' in loss_dict:
+                        log_loss_dict['training/diff_loss'] = loss_dict.pop('diff_loss')
+                    if 'xs_loss' in loss_dict:
+                        log_loss_dict['training/xs_loss'] = loss_dict.pop('xs_loss')
+                    self.logger.log_metrics(log_loss_dict, step=self.global_step)
                     self.logger.log_metrics({"training/lr": optimizer.param_groups[0]["lr"]}, step=self.global_step)
                 logger.info(f"Step: {self.global_step}, eta: {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}, "f"loss: {loss.item():.4f}, lr: {optimizer.param_groups[0]['lr']:.6f}")
 
@@ -287,6 +309,10 @@ class SimpleVideoGenerationExperiment:
 
                 self.global_step += 1
 
+        # save final checkpoint
+        self.save_checkpoint(self.global_step, accelerator, save_top_k)
+        logger.info("********** Training completed **********\n")
+
     def validation(self):
         """Run validation step for the experiment.
             Pass ema checkpoint if you want to use EMA model for validation.
@@ -307,8 +333,8 @@ class SimpleVideoGenerationExperiment:
             set_seed(self.cfg.experiment.validation.manual_seed, device_specific=True)
 
         self.metrics = self._build_metrics(device=device)
-        self.resume_checkpoint(accelerator, self.ckpt_path)
         self.model, val_loader = accelerator.prepare(self.model, val_loader)
+        self.resume_checkpoint(accelerator, self.ckpt_path)
 
         logger.info(f"Sampling step: {self.cfg.algorithm.diffusion.sampling_timesteps}")
         logger.info(f"Scheduling matrix: {self.cfg.algorithm.scheduling_matrix}")
@@ -325,6 +351,7 @@ class SimpleVideoGenerationExperiment:
 
         # Load required components for validation
         model.new_on_validation_epoch_start()
+        logger.info(f'len(val_loader) {len(val_loader)}')
         num_validate_batches = min(len(val_loader), self.cfg.experiment.validation.limit_batch)
 
         logger.info("********** Starting validation... **********")
@@ -333,20 +360,29 @@ class SimpleVideoGenerationExperiment:
         model.eval()
         with torch.no_grad():
             total_loss = 0.0
+            total_diff_loss = 0.0
+            total_xs_loss = 0.0
             for i, batch in enumerate(val_yielder):
                 if i >= num_validate_batches:
                     break
-
+                
+                if (i + 1 ) % 10 == 0:
+                    logger.info(f"Validation batch {i + 1}/{num_validate_batches}...")
                 # Preprocess
                 batch = model.on_after_batch_transfer(batch, i)
                 denoising_output, all_videos = model.new_validation_step(batch, i, namespace="validation")
 
                 # Process denoising output
                 total_loss += denoising_output["loss"].item()
+                if "diff_loss" in denoising_output:
+                    total_diff_loss += denoising_output["diff_loss"].item()
+                if "xs_loss" in denoising_output:
+                    total_xs_loss += denoising_output["xs_loss"].item()
                 gt_videos = denoising_output["gts"]
                 recons = denoising_output["recons"]
                 num_videos_to_log = min(self.cfg.algorithm.logging.max_num_videos - self.num_logged_videos, gt_videos.shape[0])
-                if self.logger:
+
+                if self.logger and num_videos_to_log > 0:
                     log_video(
                         recons[:num_videos_to_log],
                         gt_videos[:num_videos_to_log],
@@ -359,8 +395,9 @@ class SimpleVideoGenerationExperiment:
                     )
 
                 # Log samples
-                if self.logger:
+                if self.logger and num_videos_to_log > 0:
                     self.log_videos(all_videos, namespace=namespace, context_frames=model.n_context_frames, global_step=i)
+                
                 
                 accelerator.wait_for_everyone()
                 #TODO: gather distributed data if needed
@@ -371,9 +408,19 @@ class SimpleVideoGenerationExperiment:
             # Log average loss
             avg_loss = total_loss / num_validate_batches
             logger.info(f"Validation average loss: {avg_loss:.4f}")
+            log_loss = {f"{namespace}/avg_loss": avg_loss}
+            if total_diff_loss > 0:
+                avg_diff_loss = total_diff_loss / num_validate_batches
+                logger.info(f"Validation average diff loss: {avg_diff_loss:.4f}")
+                log_loss[f"{namespace}/avg_diff_loss"] = avg_diff_loss
+            if total_xs_loss > 0:
+                avg_xs_loss = total_xs_loss / num_validate_batches
+                logger.info(f"Validation average xs loss: {avg_xs_loss:.4f}")
+                log_loss[f"{namespace}/avg_xs_loss"] = avg_xs_loss
+
             if self.logger:
-                self.logger.log_metrics({f"{namespace}/avg_loss": avg_loss}, step=self.global_step)
-            
+                self.logger.log_metrics(log_loss, step=self.global_step)
+
             # compute metrics
             for task in self.tasks:
                 result = self.metrics[task].log(task)
@@ -447,7 +494,6 @@ class SimpleVideoGenerationExperiment:
 
 
         for task in self.tasks:
-            # (f"{namespace}_{task}_vis")
             log_video(
                 cut_videos(all_videos[task]),
                 cut_videos(all_videos["gt"]),
@@ -460,13 +506,26 @@ class SimpleVideoGenerationExperiment:
                 captions=f"{task} | gt",
                 resize_to=(64, 64)
             )
+            if "gt_diff" in all_videos:
+                log_video(
+                    cut_videos(all_videos[task + "_diff"].clone()),
+                    cut_videos(all_videos["gt_diff"].clone()),
+                    step=None if namespace == "test" else global_step,
+                    namespace=f"{namespace}_{task}_diff_vis",
+                    logger=self.logger.experiment,
+                    indent=self.num_logged_videos,
+                    raw_dir=self.cfg.algorithm.logging.raw_dir,
+                    context_frames=context_frames,
+                    captions=f"{task}_diff | gt_diff",
+                    resize_to=(64, 64)
+                )
 
         self.num_logged_videos += batch_size
 
     def resume_checkpoint(self, accelerator: Accelerator, ckpt_path: str) -> None:
         if not ckpt_path or not Path(ckpt_path).exists():
             logger.info("No checkpoint found. Starting from scratch.")
-            return
+            raise FileNotFoundError(f"Checkpoint path {ckpt_path} does not exist.")
 
         logger.info(f"Resuming from checkpoint: {ckpt_path}")
         # Load pytorch lightning state
@@ -488,7 +547,7 @@ class SimpleVideoGenerationExperiment:
         elif ckpt_path.endswith(".safetensors"):
             state_dict = load_file(ckpt_path)
         self.model = accelerator.unwrap_model(self.model)
-        self.model.load_state_dict(state_dict, strict=True)
+        self.model.load_state_dict(state_dict, strict=False)
         self.model = accelerator.prepare(self.model)
         return -1
 
