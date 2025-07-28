@@ -18,14 +18,16 @@ from .diffusion import (
 )
 from .history_guidance import HistoryGuidance
 
-
-class DFoTVideo(BaseVideoAlgo):
+torch.set_printoptions(linewidth=100000, threshold=10000)
+class DifferenceDFoTVideo(BaseVideoAlgo):
     """
     An algorithm for training and evaluating
     Diffusion Forcing Transformer (DFoT) for video generation.
     """
     def __init__(self, cfg: DictConfig):
+        assert cfg.backbone.merge_type in ["concat", "interleaved"], f"Unsupported merge type: {cfg.backbone.merge_type}"
         super().__init__(cfg)
+        self.merge_type = cfg.backbone.merge_type
 
     def _build_model(self) -> None:
         diffusion_cls = (
@@ -35,22 +37,71 @@ class DFoTVideo(BaseVideoAlgo):
         )
         super()._build_model(diffusion_cls=diffusion_cls)
 
+    @property
+    def diff_max_tokens(self) -> int:
+        return self.max_tokens * 2
+    
+    @torch.no_grad()
+    def merge_tensors(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """
+        Merge two tensors based on the merge type.
+        """ 
+        if x is None or y is None:
+            return None
+        assert x.shape == y.shape, "Tensors must have the same shape to be merged."
+        if self.merge_type == 'concat':
+            return torch.cat([x, y], dim=1)
+        elif self.merge_type == 'interleaved':
+            return rearrange(
+                torch.stack([x, y], dim=-1),
+                "b t ... two -> b (t two) ...",
+            )
+        else:
+            raise ValueError(f"Unsupported merge type: {self.merge_type}")
+    
+    @torch.no_grad()
+    def unmerge_tensors(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Unmerge the merged tensor based on the merge type.
+        """
+        if self.merge_type == 'concat':
+            return x.chunk(2, dim=1)
+        elif self.merge_type == 'interleaved':
+            return rearrange(
+                x, "b (t two) ... -> (two b) t ...", two=2
+            ).chunk(2, dim=0)
+        else:
+            raise ValueError(f"Unsupported merge type: {self.merge_type}")        
+
     # ---------------------------------------------------------------------
     # Training
     # ---------------------------------------------------------------------
     def training_step(self, batch, batch_idx, namespace="training") -> STEP_OUTPUT:
         """Training step"""
-        xs = batch["xs"]
+        xs = batch["xs"] # shape: (B, T*2, C, H, W)
+        difference = torch.diff(xs, dim=1, prepend=xs[:, :1])
+
         conditions = batch.get("conditions")
         masks = batch["masks"]
 
+        # TODO: check if we should use the same noise for xs and difference xs
         noise_levels, masks = self._get_training_noise_levels(xs, masks)
+        xs = self.merge_tensors(difference, xs) #TODO: difference should be first
+        noise_levels = self.merge_tensors(noise_levels, noise_levels) # Double the noise levels for difference
+        org_masks = masks.clone()
+        masks = self.merge_tensors(masks, masks)
+
+        conditions = self._process_conditions(conditions)
+        conditions = self.merge_tensors(conditions, conditions) if conditions is not None else None
         xs_pred, loss = self.diffusion_model(
             xs,
-            self._process_conditions(conditions),
+            conditions,
             k=noise_levels,
         )
+        diff_loss, xs_loss = self.unmerge_tensors(loss)
         loss = self._reweight_loss(loss, masks)
+        diff_loss = self._reweight_loss(diff_loss.detach(), org_masks)
+        xs_loss = self._reweight_loss(xs_loss.detach(), org_masks)
 
         # if attached to trainer => log
         try:
@@ -63,16 +114,53 @@ class DFoTVideo(BaseVideoAlgo):
                     sync_dist=True,
                     add_dataloader_idx=False
                 )
+                self.log(
+                    f"{namespace}/diff_loss",
+                    diff_loss,
+                    on_step=namespace == "training",
+                    on_epoch=namespace != "training",
+                    sync_dist=True,
+                    add_dataloader_idx=False
+                )
+                self.log(
+                    f"{namespace}/xs_loss",
+                    xs_loss,
+                    on_step=namespace == "training",
+                    on_epoch=namespace != "training",
+                    sync_dist=True,
+                    add_dataloader_idx=False
+                )
         except AttributeError:
             pass
 
         xs, xs_pred = map(self._unnormalize_x, (xs, xs_pred))
         output_dict = {
             "loss": loss,
+            'diff_loss': diff_loss,
+            'xs_loss': xs_loss,
             "xs_pred": xs_pred,
             "xs": xs,
         }
         return output_dict
+
+    @torch.no_grad()
+    def new_validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
+        """
+        dataloader_idx: 0 for training, 1 for validation
+        """
+        # dataloader_name = self.get_val_dataloader_name(dataloader_idx)
+        denoising_output = self._new_eval_denoising(batch, batch_idx, namespace=namespace)
+        # 2. Sample all videos (based on the specified tasks)
+        # and log the generated videos and metrics.
+        all_videos = self._sample_all_videos(batch, batch_idx, namespace, n_context_tokens=self.n_context_tokens)
+        # self._log_videos(all_videos, namespace, self.n_context_frames)
+        
+        # if self.cfg.save_attn_map.enabled:
+        #     # TODO: unconditional 
+        #     save_attention_maps(attn_maps, self.cfg.save_attn_map.attn_map_dir, False, batch_idx)
+
+        # return two outputs: denoising output and all_videos
+        return denoising_output, all_videos
 
     # ---------------------------------------------------------------------
     # Sampling
@@ -80,21 +168,33 @@ class DFoTVideo(BaseVideoAlgo):
     def _sample_all_videos(
         self, batch, batch_idx, namespace="validation", n_context_tokens=None
     ) -> Optional[Dict[str, Tensor]]:
-        # xs, conditions, *_, gt_videos = batch
-        xs = batch["xs"]
-        conditions = batch.get("conditions")
         gt_videos = batch["gt_videos"]
+        xs = batch["xs"]
 
-        n_context_tokens = n_context_tokens if n_context_tokens is not None else self.n_context_tokens
         all_videos: Dict[str, Tensor] = {"gt": xs.clone()}
 
+        difference = torch.diff(xs, dim=1, prepend=xs[:, :1])
+        xs = self.merge_tensors(difference, xs) #TODO: difference should be first
+
+        conditions = batch.get("conditions")
+        conditions = self._process_conditions(conditions)
+        conditions = self.merge_tensors(conditions, conditions) if conditions is not None else None        
+
+        n_context_tokens = n_context_tokens if n_context_tokens is not None else self.n_context_tokens
+        n_context_tokens = n_context_tokens*2 # double the context tokens for difference
+        if n_context_tokens > 0:
+            assert self.merge_type == "interleaved", "n_context_tokens > 0 is only supported for interleaved merge type"
+
         for task in self.tasks:
+            assert task == 'prediction', "Only prediction task is supported now for DifferenceDFoTVideo"
             sample_fn = (
                 self._predict_videos
                 if task == "prediction"
                 else self._interpolate_videos
             )
             all_videos[task] = sample_fn(xs, conditions=conditions, n_context_tokens=n_context_tokens)
+            gen_diff, all_videos[task] = self.unmerge_tensors(all_videos[task]) # unmerge the videos
+            all_videos[task + "_diff"] = gen_diff
 
         # remove None values
         all_videos = {k: v for k, v in all_videos.items() if v is not None}
@@ -109,6 +209,8 @@ class DFoTVideo(BaseVideoAlgo):
                 k: self._decode(v) if k != "gt" else gt_videos
                 for k, v in all_videos.items()
             }
+            all_videos['gt_diff'] = torch.diff(gt_videos, dim=1, prepend=gt_videos[:, :1])
+        
         return all_videos
 
     def _predict_videos(
@@ -136,7 +238,7 @@ class DFoTVideo(BaseVideoAlgo):
         )
         keyframe_indices = torch.cat(
             [torch.arange(n_context_tokens), keyframe_indices]
-        ).unique()  # context frames are always keyframes
+        ).unique() # context frames are always keyframes
 
         if conditions is not None:
             match self.external_cond_type:
@@ -159,8 +261,7 @@ class DFoTVideo(BaseVideoAlgo):
             conditions=key_conditions,
             history_guidance=history_guidance,
             reconstruction_guidance=self.cfg.diffusion.reconstruction_guidance,
-            sliding_context_len=self.cfg.tasks.prediction.sliding_context_len
-            or self.max_tokens // 2,
+            sliding_context_len=self.cfg.tasks.prediction.sliding_context_len or self.max_tokens, # NOTE: Not divided by 2 because we have difference 
         )
         xs_pred[:, keyframe_indices] = xs_pred_key.to(xs_pred.dtype)
         # if is_rank_zero: # uncomment to visualize history guidance
@@ -199,6 +300,9 @@ class DFoTVideo(BaseVideoAlgo):
             conditions (Optional[Tensor], "B T ..."): The external conditions for the video.
             history_guidance (Optional[HistoryGuidance]): The history guidance object - if None, it will be initialized from the config.
         """
+        raise NotImplementedError(
+            "Current DifferenceDFoT does not support interpolation. Use the prediction task instead."
+        )
         # Generate default context mask if not provided
         if context_mask is None:
             context_mask = torch.zeros(
@@ -401,7 +505,7 @@ class DFoTVideo(BaseVideoAlgo):
             Record of all steps of the sampling process
         """
         if length is None:
-            length = self.max_tokens
+            length = self.max_tokens*2 # Double for difference
         if sliding_context_len is None:
             if self.max_tokens < length:
                 raise ValueError(
@@ -413,7 +517,6 @@ class DFoTVideo(BaseVideoAlgo):
             sliding_context_len = self.max_tokens - 1
 
         batch_size, gt_len, *_ = context.shape
-
         if sliding_context_len < gt_len:
             raise ValueError(
                 "sliding_context_len is expected to be >= length of initial context,"
@@ -421,19 +524,15 @@ class DFoTVideo(BaseVideoAlgo):
                 "consider specifying sliding_context_len=-1."
             )
 
-        chunk_size = self.chunk_size if self.use_causal_mask else self.max_tokens
-
+        chunk_size = self.chunk_size if self.use_causal_mask else self.max_tokens*2
         curr_token = gt_len
         xs_pred = context
         x_shape = self.x_shape
         record = None
+
+        n_run = 1 + (length - sliding_context_len - 1) // (self.max_tokens*2 - sliding_context_len)
         pbar = tqdm(
-            total=self.sampling_timesteps
-            * (
-                1
-                + (length - sliding_context_len - 1)
-                // (self.max_tokens - sliding_context_len)
-            ),
+            total=self.sampling_timesteps * n_run,
             initial=0,
             desc="Predicting with DFoT",
             leave=False,
@@ -445,7 +544,7 @@ class DFoTVideo(BaseVideoAlgo):
             # corner case at the beginning
             c = min(sliding_context_len, curr_token)
             # try biggest prediction chunk size
-            h = min(length - curr_token, self.max_tokens - c)
+            h = min(length - curr_token, self.max_tokens*2 - c)
             # chunk_size caps how many future tokens are diffused at once to save compute for causal model
             h = min(h, chunk_size) if chunk_size > 0 else h
             l = c + h
@@ -462,7 +561,7 @@ class DFoTVideo(BaseVideoAlgo):
             pad = torch.zeros((batch_size, h), dtype=torch.long)
             context_mask = torch.cat([context_mask, pad.long()], 1).to(context.device)
 
-            cond_len = l if self.use_causal_mask else self.max_tokens
+            cond_len = l if self.use_causal_mask else self.max_tokens * 2
             cond_slice = None
             if conditions is not None:
                 match self.external_cond_type:
@@ -559,12 +658,11 @@ class DFoTVideo(BaseVideoAlgo):
         x_shape = self.x_shape
 
         if length is None:
-            length = self.max_tokens if context is None else context.shape[1]
-        if length > self.max_tokens:
+            length = self.max_tokens*2 if context is None else context.shape[1]
+        if length > self.max_tokens*2:
             raise ValueError(
                 f"length is expected to <={self.max_tokens}, got {length}."
             )
-
         if context is not None:
             if context_mask is None:
                 raise ValueError("context_mask must be provided if context is given.")
@@ -587,17 +685,17 @@ class DFoTVideo(BaseVideoAlgo):
             if context.shape[:2] != context_mask.shape:
                 raise ValueError("context and context_mask must have the same shape.")
 
-        # if conditions is not None:
-        #     if self.use_causal_mask and conditions.shape[1] != length:
-        #         raise ValueError(
-        #             f"for causal models, conditions length is expected to be {length}, got {conditions.shape[1]}."
-        #         )
-        #     elif not self.use_causal_mask and conditions.shape[1] != self.max_tokens:
-        #         raise ValueError(
-        #             f"for noncausal models, conditions length is expected to be {self.max_tokens}, got {conditions.shape[1]}."
-        #         )
+        if conditions is not None and self.external_cond_type == "action":
+            if self.use_causal_mask and conditions.shape[1] != length:
+                raise ValueError(
+                    f"for causal models, conditions length is expected to be {length}, got {conditions.shape[1]}."
+                )
+            elif not self.use_causal_mask and conditions.shape[1] != self.max_tokens*2:
+                raise ValueError(
+                    f"for noncausal models, conditions length is expected to be {self.max_tokens*2}, got {conditions.shape[1]}."
+                )
 
-        horizon = length if self.use_causal_mask else self.max_tokens
+        horizon = length if self.use_causal_mask else self.max_tokens * 2
         padding = horizon - length
         # create initial xs_pred with noise
         xs_pred = torch.randn(
@@ -607,12 +705,14 @@ class DFoTVideo(BaseVideoAlgo):
         )
         xs_pred = torch.clamp(xs_pred, -self.clip_noise, self.clip_noise)
 
+        # if context is None, create empty context and context mask
         if context is None:
             # create empty context and zero context mask
             context = torch.zeros_like(xs_pred)
             context_mask = torch.zeros_like(
                 (batch_size, horizon), dtype=torch.long, device=self.device
             )
+        # if context is provided, check its length and pad if necessary
         elif padding > 0:
             # pad context and context mask to reach horizon
             context_pad = torch.zeros(
@@ -660,7 +760,7 @@ class DFoTVideo(BaseVideoAlgo):
                 initial=0,
                 desc="Sampling with DFoT",
                 leave=False,
-            )
+            )            
 
         for m in range(scheduling_matrix.shape[0] - 1):
             from_noise_levels = scheduling_matrix[m]
@@ -724,18 +824,7 @@ class DFoTVideo(BaseVideoAlgo):
                     xs_pred,
                     from_noise_levels,
                     to_noise_levels,
-                    self._process_conditions(
-                        (
-                            repeat(
-                                conditions,
-                                "b ... -> (b nfe) ...",
-                                nfe=nfe,
-                            ).clone()
-                            if conditions is not None
-                            else None
-                        ),
-                        from_noise_levels,
-                    ),
+                    repeat(conditions, "b ... -> (b nfe) ...", nfe=nfe).clone() if conditions is not None else None,
                     conditions_mask,
                     guidance_fn=composed_guidance_fn,
                 )
@@ -771,229 +860,9 @@ class DFoTVideo(BaseVideoAlgo):
         return_all: bool = False,
         pbar: Optional[tqdm] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        """
-        The unified sampling method, with length up to maximum token size.
-        context of length can be provided along with a mask to achieve conditioning.
-
-        Args
-        ----
-        batch_size: int
-            Batch size of the sampling process
-        length: Optional[int]
-            Number of frames in sampled sequence
-            If None, fall back to length of context, and then fall back to `self.max_tokens`
-        context: Optional[torch.Tensor], Shape (batch_size, length, *self.x_shape)
-            Context tokens to condition on. Assumed to be same across batch.
-            Tokens that are specified as context by `context_mask` will be used for conditioning,
-            and the rest will be discarded.
-        context_mask: Optional[torch.Tensor], Shape (batch_size, length)
-            Mask for context
-            0 = To be generated, 1 = Ground truth context, 2 = Generated context
-            Some sampling logic may discriminate between ground truth and generated context.
-        conditions: Optional[torch.Tensor], Shape (batch_size, length (causal) or self.max_tokens (noncausal), ...)
-            Unprocessed external conditions for sampling
-        guidance_fn: Optional[Callable]
-            Guidance function for sampling
-        return_all: bool
-            Whether to return all steps of the sampling process
-        Returns
-        -------
-        xs_pred: torch.Tensor, Shape (batch_size, length, *self.x_shape)
-            Complete sequence containing context and generated tokens
-        record: Optional[torch.Tensor], Shape (num_steps, batch_size, length, *self.x_shape)
-            All recorded intermediate results during the sampling process
-        """
-        x_shape = self.x_shape
-
-        if length is None:
-            length = self.max_tokens if context is None else context.shape[1]
-        if length > self.max_tokens:
-            raise ValueError(
-                f"length is expected to <={self.max_tokens}, got {length}."
-            )
-
-        if context is not None:
-            if context_mask is None:
-                raise ValueError("context_mask must be provided if context is given.")
-            if context.shape[0] != batch_size:
-                raise ValueError(
-                    f"context batch size is expected to be {batch_size} but got {context.shape[0]}."
-                )
-            if context.shape[1] != length:
-                raise ValueError(
-                    f"context length is expected to be {length} but got {context.shape[1]}."
-                )
-            if tuple(context.shape[2:]) != tuple(x_shape):
-                raise ValueError(
-                    f"context shape not compatible with x_stacked_shape {x_shape}."
-                )
-
-        if context_mask is not None:
-            if context is None:
-                raise ValueError("context must be provided if context_mask is given. ")
-            if context.shape[:2] != context_mask.shape:
-                raise ValueError("context and context_mask must have the same shape.")
-
-        horizon = length if self.use_causal_mask else self.max_tokens
-        padding = horizon - length
-        # create initial xs_pred with noise
-        xs_pred = torch.randn(
-            (batch_size, horizon, *x_shape),
-            device=self.device,
-            generator=self.generator,
+        raise NotImplementedError(
+            "Refinement sampling is not implemented for DFoT. "
+            "Please use _sample_sequence instead."
         )
-        xs_pred = torch.clamp(xs_pred, -self.clip_noise, self.clip_noise)
 
-        if context is None:
-            # create empty context and zero context mask
-            context = torch.zeros_like(xs_pred)
-            context_mask = torch.zeros_like(
-                (batch_size, horizon), dtype=torch.long, device=self.device
-            )
-        elif padding > 0:
-            # pad context and context mask to reach horizon
-            context_pad = torch.zeros(
-                (batch_size, padding, *x_shape), device=self.device
-            )
-            # NOTE: In context mask, -1 = padding, 0 = to be generated, 1 = GT context, 2 = generated context
-            context_mask_pad = -torch.ones(
-                (batch_size, padding), dtype=torch.long, device=self.device
-            )
-            context = torch.cat([context, context_pad], 1)
-            context_mask = torch.cat([context_mask, context_mask_pad], 1)
-
-        if history_guidance is None:
-            # by default, use conditional sampling
-            history_guidance = HistoryGuidance.conditional(
-                timesteps=self.timesteps,
-            )
-
-        # replace xs_pred's context frames with context
-        xs_pred = torch.where(self._extend_x_dim(context_mask) >= 1, context, xs_pred)
-
-        # generate scheduling matrix
-        scheduling_matrix = self._generate_refine_scheduling_matrix(
-            horizon=horizon - padding,
-            goback_length=goback_length,
-            n_goback=n_goback,
-            padding=padding,
-        )
-        scheduling_matrix = scheduling_matrix.to(self.device)
-        scheduling_matrix = repeat(scheduling_matrix, "m t -> m b t", b=batch_size)
-        scheduling_matrix = torch.where(
-            context_mask[None] >= 1, -1, scheduling_matrix
-        )
-        
-        record = [] if return_all else None
-
-        if pbar is None:
-            pbar = tqdm(
-                total=scheduling_matrix.shape[0] - 1,
-                initial=0,
-                desc="Sampling with DFoT",
-                leave=False,
-            )
-
-        for m in range(scheduling_matrix.shape[0] - 1):
-            from_noise_levels = scheduling_matrix[m]
-            to_noise_levels = scheduling_matrix[m+1]
-
-            if from_noise_levels[0,-1].item() > to_noise_levels[0,-1].item():
-                # update context mask by changing 0 -> 2 for fully generated tokens
-                context_mask = torch.where(
-                    torch.logical_and(context_mask == 0, from_noise_levels == -1),
-                    2,
-                    context_mask,
-                )
-
-                # create a backup with all context tokens unmodified
-                xs_pred_prev = xs_pred.clone()
-                if return_all:
-                    record.append(xs_pred.clone())
-
-                conditions_mask = None
-                with history_guidance(context_mask) as history_guidance_manager:
-                    nfe = history_guidance_manager.nfe
-                    pbar.set_postfix(NFE=nfe)
-                    xs_pred, from_noise_levels, to_noise_levels, conditions_mask = (
-                        history_guidance_manager.prepare(
-                            xs_pred,
-                            from_noise_levels,
-                            to_noise_levels,
-                            replacement_fn=self.diffusion_model.q_sample,
-                            replacement_only=self.is_full_sequence,
-                        )
-                    )
-
-                    if reconstruction_guidance > 0:
-
-                        def composed_guidance_fn(
-                            xk: torch.Tensor,
-                            pred_x0: torch.Tensor,
-                            alpha_cumprod: torch.Tensor,
-                        ) -> torch.Tensor:
-                            loss = (
-                                F.mse_loss(pred_x0, context, reduction="none")
-                                * alpha_cumprod.sqrt()
-                            )
-                            _context_mask = rearrange(
-                                context_mask.bool(),
-                                "b t -> b t" + " 1" * len(x_shape),
-                            )
-                            # scale inversely proportional to the number of context frames
-                            loss = torch.sum(
-                                loss
-                                * _context_mask
-                                / _context_mask.sum(dim=1, keepdim=True).clamp(min=1),
-                            )
-                            likelihood = -reconstruction_guidance * 0.5 * loss
-                            return likelihood
-
-                    else:
-                        composed_guidance_fn = guidance_fn
-
-                    # update xs_pred by DDIM or DDPM sampling
-                    xs_pred = self.diffusion_model.sample_step(
-                        xs_pred,
-                        from_noise_levels,
-                        to_noise_levels,
-                        self._process_conditions(
-                            (
-                                repeat(
-                                    conditions,
-                                    "b ... -> (b nfe) ...",
-                                    nfe=nfe,
-                                ).clone()
-                                if conditions is not None
-                                else None
-                            ),
-                            from_noise_levels,
-                        ),
-                        conditions_mask,
-                        guidance_fn=composed_guidance_fn,
-                    )
-                    xs_pred = history_guidance_manager.compose(xs_pred)
-                    xc_t = self.diffusion_model.q_sample(context, to_noise_levels)
-                    xs_pred = torch.where(
-                        self._extend_x_dim(context_mask) == 0, xs_pred, xc_t
-                    )
-                # only replace the tokens being generated (revert context tokens)
-                xs_pred = torch.where(
-                    self._extend_x_dim(context_mask) == 0, xs_pred, xs_pred_prev
-                )
-                pbar.update(1)
-            else:
-                xs_pred = self.diffusion_model.q_sample_from_x_k(
-                    xs_pred,
-                    from_noise_levels,
-                    to_noise_levels
-                )
-
-        if return_all:
-            record.append(xs_pred.clone())
-            record = torch.stack(record)
-        if padding > 0:
-            xs_pred = xs_pred[:, :-padding]
-            record = record[:, :, :-padding] if return_all else None
-
-        return xs_pred, record
+    

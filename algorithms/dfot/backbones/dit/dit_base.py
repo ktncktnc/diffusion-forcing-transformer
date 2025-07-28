@@ -13,7 +13,7 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 from dataclasses import dataclass
 from einops import rearrange
-from ..modules.embeddings import RotaryEmbedding1D, RotaryEmbedding2D, RotaryEmbedding3D
+from ..modules.embeddings import RotaryEmbedding1D, RotaryEmbedding2D, RotaryEmbedding3D, DoubleRotaryEmbedding3D
 from .dit_blocks import (
     DiTBlock,
     MatrixDiTBlock,
@@ -255,7 +255,17 @@ class DiTBase(nn.Module):
                             self.spatial_grid_size[1],
                         ),
                     )
-        
+            case "interleaved_difference_rope_3d": # for difference diffusion with concat merge.
+                self.rope = DoubleRotaryEmbedding3D(
+                        dim=self.hidden_size//self.num_heads,
+                        sizes=(
+                            self.max_temporal_length,
+                            self.spatial_grid_size[0],
+                            self.spatial_grid_size[1],
+                        ),
+                        merge_type=self.kwargs.get("merge_type", None)
+                    )
+
         if self.is_matrix_attention:
             # NOTE: RoPE will be added for each row of the matrix independently. Doing this makes sure every row has its own frequencies. If we flatten the row and column, frequencies will be smaller by row.
             self.temporal_rope = RotaryEmbedding1D(

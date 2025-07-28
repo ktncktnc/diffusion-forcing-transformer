@@ -172,6 +172,7 @@ class RotaryEmbeddingND(nn.Module):
         """
         super().__init__()
         self.n_dims = len(dims)
+        self.sizes = sizes
         self.dims = dims
         self.theta = theta
         self.flatten = flatten
@@ -274,6 +275,62 @@ class RotaryEmbedding3D(RotaryEmbeddingND):
                 dims = (dim // 3, dim // 3 + 1, dim // 3 + 1)
 
         super().__init__(tuple(d * 2 for d in dims), sizes, theta, flatten)
+
+class DoubleRotaryEmbedding3D(RotaryEmbedding3D):
+    """
+    RoPE3D for Video Transformer with double frequency.
+    Handles tensors of shape [B x 2*T x H x W x C] or [B x (2*T x H x W) x C].
+    Each will be added independently
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        sizes: Tuple[int, int, int],
+        theta: float = 10000.0,
+        flatten: bool = True,
+        merge_type: str = "concat",
+    ):
+        super().__init__(
+            dim=dim,
+            sizes=sizes,
+            theta=theta,
+            flatten=flatten,
+        )
+        assert merge_type in ["concat", "interleaved"], f"Unsupported merge type: {merge_type}"
+        self.merge_type = merge_type
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Unstack input tensor into two parts, add to batch size
+        t = x.shape[1] // 2
+        if self.merge_type == "concat":
+            if self.flatten:
+                x = rearrange(x, "b m (two t h w) c -> (b two) m (t h w) c", two=2, t=t)
+            else:
+                x = rearrange(x, "b m (two t) h w c -> (b two) m t h w c", two=2, t=t)
+        elif self.merge_type == "interleaved":
+            if self.flatten:
+                x = rearrange(x,  "b m (t two h w) c -> (b two) m (h w) c", two=2, t=t)
+            else:
+                x = rearrange(x, "b m (t two) h w c -> (b two) m t h w ", two=2, t=t)
+        else:
+            raise ValueError(f"Unsupported merge type: {self.merge_type}")
+        x = super().forward(x)
+
+        # Stack back to original shape
+        if self.merge_type == "concat":
+            if self.flatten:
+                x = rearrange(x, "(b two) m (t h w) c -> b m (two t h w) c", two=2, t=t)
+            else:
+                x = rearrange(x, "(b two) m t h w c -> b m (two t) h w c", two=2, t=t)
+        elif self.merge_type == "interleaved":
+            if self.flatten:
+                x = rearrange(x, "(b two) m (h w) c -> b m (t two h w) c", two=2, t=t)
+            else:
+                x = rearrange(x, "(b two) m t h w -> b m (t two) h w", two=2, t=t)
+        else:
+            raise ValueError(f"Unsupported merge type: {self.merge_type}")
+        return x
 
 
 class RandomEmbeddingDropout(nn.Module):

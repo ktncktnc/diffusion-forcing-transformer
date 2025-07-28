@@ -25,6 +25,7 @@ class BaseBackbone(ABC, nn.Module):
         super().__init__()
 
         self.cfg = cfg
+        self.max_tokens = max_tokens
         self.external_cond_type = external_cond_type
         self.external_cond_num_classes = external_cond_num_classes
         self.external_cond_dim = external_cond_dim

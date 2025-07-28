@@ -175,30 +175,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
         # 3. Metrics
         if len(self.tasks) == 0:
             return
-        # registry = SharedVideoMetricModelRegistry()
-        # metric_types = self.logging.metrics
-        # for task in self.tasks:
-        #     match task:
-        #         case "prediction":
-        #             self.metrics_prediction = VideoMetric(
-        #                 registry,
-        #                 metric_types,
-        #                 split_batch_size=self.logging.metrics_batch_size,
-        #             )
-        #             # freeze the metrics model
-        #             freeze_model(self.metrics_prediction)
-        #         case "interpolation":
-        #             assert (
-        #                 not self.use_causal_mask
-        #                 and not self.is_full_sequence
-        #                 and self.max_tokens > 2
-        #             ), "To execute interpolation, the model must be non-causal, not full sequence, and be able to process more than 2 tokens."
-        #             self.metrics_interpolation = VideoMetric(
-        #                 registry,
-        #                 metric_types,
-        #                 split_batch_size=self.logging.metrics_batch_size,
-        #             )
-        #             freeze_model(self.metrics_interpolation)
 
     def get_val_dataloader_name(self, dataloader_idx: int) -> str:
         """

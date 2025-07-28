@@ -14,6 +14,7 @@ use_l1_loss: True
 use_checkpoint: True
 precision: ${experiment.validation.precision}
 latent_type: ${dataset.latent.type}
+pretrained_path: /scratch/s224075134/temporal_diffusion/AR-Diffusion/experiments/taichi_vae/ckpt_dir/checkpoint-500000/model.safetensors
 max_encode_length: 200
 logging:
   max_video_length: 200

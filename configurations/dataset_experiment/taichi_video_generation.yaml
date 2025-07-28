@@ -6,7 +6,6 @@
 # useful for dataset-specific overrides
 
 defaults:
-  - ../algorithm/backbone@algorithm.backbone: dit3d
   - ../algorithm@algorithm.vae: titok_kl_preprocessor
 
 dataset:
@@ -15,7 +14,7 @@ dataset:
   latent:
     enabled: True
     suffix: artitok_taichi500k
-    type: pre_artitok_taichi500k
+    type: pre_sample
 
 algorithm:
   latent_shape: [1, 32, 4] # fixed latent shape, if not null
@@ -31,7 +30,7 @@ algorithm:
       cum_snr_decay: 0.96
   logging:
     n_metrics_frames: 16
-    max_num_videos: 16
+    max_num_videos: 32
     loss_freq: 50
     grad_norm_freq: 50
     metrics: [fvd, is, fid, lpips, mse, ssim, psnr]

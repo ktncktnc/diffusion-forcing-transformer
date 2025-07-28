@@ -6,7 +6,7 @@
 # useful for dataset-specific overrides
 
 defaults:
-  - ../algorithm/backbone@algorithm.backbone: dit3d
+  # - ../algorithm/backbone@algorithm.backbone: dit3d
   - ../algorithm@algorithm.vae: dc_ae_preprocessor # dc_ae_preprocessor # kl_autoencoder_preprocessor
 
 dataset:
@@ -28,8 +28,8 @@ algorithm:
       cum_snr_decay: 0.96
   logging:
     n_metrics_frames: 16
-    max_num_videos: 128
-    metrics: [vbench, fvd, is, fid, lpips, mse, ssim, psnr]
+    max_num_videos: 64
+    metrics: [fvd, is, fid, lpips, mse, ssim, psnr]
   contrastive_clip_frames: 8
   diffusion_clip_frames: 16
   contrastive_loss_weight: 0.3
@@ -50,7 +50,7 @@ experiment:
       num_workers: 11
       shuffle: True
     checkpointing:
-      every_n_train_steps: 25001
+      every_n_train_steps: 25000
       every_n_epochs: null
       save_last: True
       save_top_k: 5

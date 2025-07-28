@@ -28,7 +28,7 @@ algorithm:
   logging:
     n_metrics_frames: 16
     max_num_videos: 16
-    metrics: [vbench, fvd, is, fid, lpips, mse, ssim, psnr]
+    metrics: [fvd, is, fid, lpips, mse, ssim, psnr]
   contrastive_clip_frames: 8
   diffusion_clip_frames: 16
   contrastive_loss_weight: 0.3
