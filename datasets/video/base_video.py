@@ -52,11 +52,23 @@ class BaseVideoDataset(torch.utils.data.Dataset, ABC):
         # Download dataset if not exists
         if self._should_download():
             self.download_dataset()
-        if not self.metadata_dir.exists():
+        
+        need_build_metadata = True
+        if self.metadata_dir.exists():
+            # check if metadata for the split already exists
+            for split in self._ALL_SPLITS:
+                if not (self.metadata_dir / f"{split}.pt").exists():
+                    need_build_metadata = True
+                    break
+            
+        if need_build_metadata:
             self.metadata_dir.mkdir(exist_ok=True, parents=True)
             for split in self._ALL_SPLITS:
-                # print('split', split)
-                self.build_metadata(split)
+                if not (self.metadata_dir / f"{split}.pt").exists():
+                    rank_zero_print(
+                        cyan(f"Building metadata for {split} split...")
+                    )
+                    self.build_metadata(split)
 
         self.metadata = self.load_metadata()
         self.augment_dataset()
@@ -92,7 +104,7 @@ class BaseVideoDataset(torch.utils.data.Dataset, ABC):
         dl: torch.utils.data.DataLoader = torch.utils.data.DataLoader(
             _VideoTimestampsDataset(video_paths),
             batch_size=16,
-            num_workers=64,
+            num_workers=128,
             collate_fn=_collate_fn,
         )
         video_pts: List[torch.Tensor] = (

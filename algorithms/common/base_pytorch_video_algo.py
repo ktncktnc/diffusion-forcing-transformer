@@ -3,6 +3,7 @@ from typing import Any, Dict
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from lightning_utilities.core.apply_func import apply_to_collection
 from omegaconf import DictConfig
+from accelerate import Accelerator
 import numpy as np
 import lightning.pytorch as pl
 import torch
@@ -231,7 +232,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
             save_attention_maps(attn_maps, self.cfg.save_attn_map.attn_map_dir, False, batch_idx)
     
     @torch.no_grad()
-    def new_validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
+    def new_validation_step(self, batch, batch_idx, accelerator: Accelerator, namespace="validation") -> STEP_OUTPUT:
         """
         dataloader_idx: 0 for training, 1 for validation
         """
@@ -259,8 +260,12 @@ class BaseVideoAlgo(BasePytorchAlgo):
             # TODO: unconditional 
             save_attention_maps(attn_maps, self.cfg.save_attn_map.attn_map_dir, False, batch_idx)
 
-        # return two outputs: denoising output and all_videos
-        return denoising_output, all_videos
+        if accelerator.is_main_process:
+            denoising_output = accelerator.gather_for_metrics(denoising_output)
+            all_videos = accelerator.gather_for_metrics(all_videos)
+            return denoising_output, all_videos
+        else:
+            return None, None
 
 
     def _eval_denoising(self, batch, batch_idx, namespace="training") -> None:
@@ -377,7 +382,6 @@ class BaseVideoAlgo(BasePytorchAlgo):
                 (0, 0, 0, 0, 0, 0, 0, gt_videos.shape[1] - recons.shape[1], 0, 0),
             )
 
-        gt_videos, recons = self.gather_data((gt_videos, recons))
         output['gts'] = gt_videos
         output['recons'] = recons
         return output

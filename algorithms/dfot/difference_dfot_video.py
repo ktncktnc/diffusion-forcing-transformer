@@ -8,6 +8,7 @@ from torch import Tensor
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 from einops import rearrange, repeat, reduce
 from tqdm import tqdm
+from accelerate import Accelerator
 from algorithms.common.base_pytorch_video_algo import BaseVideoAlgo
 from utils.distributed_utils import is_rank_zero
 from utils.torch_utils import bernoulli_tensor
@@ -144,7 +145,7 @@ class DifferenceDFoTVideo(BaseVideoAlgo):
         return output_dict
 
     @torch.no_grad()
-    def new_validation_step(self, batch, batch_idx, namespace="validation") -> STEP_OUTPUT:
+    def new_validation_step(self, batch, batch_idx, accelerator: Accelerator, namespace="validation") -> STEP_OUTPUT:
         """
         dataloader_idx: 0 for training, 1 for validation
         """
@@ -160,7 +161,12 @@ class DifferenceDFoTVideo(BaseVideoAlgo):
         #     save_attention_maps(attn_maps, self.cfg.save_attn_map.attn_map_dir, False, batch_idx)
 
         # return two outputs: denoising output and all_videos
-        return denoising_output, all_videos
+        if accelerator.is_main_process:
+            denoising_output = accelerator.gather_for_metrics(denoising_output)
+            all_videos = accelerator.gather_for_metrics(all_videos)
+            return denoising_output, all_videos
+        else:
+            return None, None
 
     # ---------------------------------------------------------------------
     # Sampling

@@ -105,9 +105,10 @@ class SimpleVideoGenerationExperiment:
         model._trainer = self
         return model
 
-    def _build_ema_model(self):
+    def _build_ema_model(self, model: Optional[torch.nn.Module] = None) -> None:
+        model = model or self.model
         if self.cfg.experiment.ema.enable:
-            self.ema = EMAModel(self.model, decay=self.cfg.experiment.ema.decay)
+            self.ema = EMAModel(model, decay=self.cfg.experiment.ema.decay)
 
     def _build_metrics(self, device):
         registry = SharedVideoMetricModelRegistry()
@@ -127,9 +128,9 @@ class SimpleVideoGenerationExperiment:
                     metrics["prediction"] = metrics_prediction
                 case "interpolation":
                     assert (
-                        not self.model.use_causal_mask
-                        and not self.model.is_full_sequence
-                        and self.model.max_tokens > 2
+                        not get_org_model(self.model).use_causal_mask
+                        and not get_org_model(self.model).is_full_sequence
+                        and get_org_model(self.model).max_tokens > 2
                     ), "To execute interpolation, the model must be non-causal, not full sequence, and be able to process more than 2 tokens."
                     metrics_interpolation = VideoMetric(
                         registry,
@@ -180,7 +181,7 @@ class SimpleVideoGenerationExperiment:
         train_yielder = make_infinite_loader(train_loader)
 
         # EMA after model and optimizer are prepared
-        self._build_ema_model()
+        self._build_ema_model(accelerator.unwrap_model(self.model))
         if self.ema:
             logger.info(f"Using EMA model with decay: {self.cfg.experiment.ema.decay}")
 
@@ -199,7 +200,7 @@ class SimpleVideoGenerationExperiment:
                 UserWarning,
             )
         
-        params = self.model.get_params()
+        params = get_org_model(self.model).get_params()
 
         start_time = time.time()
         logger.info("********** Starting training... **********")
@@ -213,11 +214,11 @@ class SimpleVideoGenerationExperiment:
         logger.info(f"  Total trainable parameters: {params['total_trainable']/ 1e6} M")
         logger.info(f"  Total frozen parameters: {params['total_frozen'] / 1e6} M")
         logger.info(f"  Total parameters: {params['total'] / 1e6} M")
-        logger.info(f'  Model x_shape: {self.model.x_shape}')
-        logger.info(f"  Model max_tokens: {self.model.max_tokens}")
-        logger.info(f"  Model external_cond_type: {self.model.external_cond_type}")
-        logger.info(f"  Model external_cond_num_classes: {self.model.external_cond_num_classes}")
-        logger.info(f"  Model external_cond_dim: {self.model.external_cond_dim}")
+        logger.info(f'  Model x_shape: {get_org_model(self.model).x_shape}')
+        logger.info(f"  Model max_tokens: {get_org_model(self.model).max_tokens}")
+        logger.info(f"  Model external_cond_type: {get_org_model(self.model).external_cond_type}")
+        logger.info(f"  Model external_cond_num_classes: {get_org_model(self.model).external_cond_num_classes}")
+        logger.info(f"  Model external_cond_dim: {get_org_model(self.model).external_cond_dim}")
 
         state = PartialState()
         logger.info(f"  Distributed type: {state.distributed_type}")
@@ -248,10 +249,10 @@ class SimpleVideoGenerationExperiment:
 
             # Preprocess
             # TODO: scaling data takes a lot of time, consider moving it to the dataset
-            batch = self.model.on_after_batch_transfer(batch, self.global_step)
+            batch = get_org_model(self.model).on_after_batch_transfer(batch, self.global_step)
 
             # Training step
-            loss_dict = self.model.training_step(batch, self.global_step)
+            loss_dict = get_org_model(self.model).training_step(batch, self.global_step)
             loss = loss_dict["loss"]
             accelerator.backward(loss)
 
@@ -270,7 +271,7 @@ class SimpleVideoGenerationExperiment:
             # Log max gradient norm before clipping
             if accelerator.is_main_process and log_grad_norm_freq and self.global_step % log_grad_norm_freq == 0:
                 max_grad_norm = 0.0
-                for name, param in self.model.named_parameters():
+                for name, param in get_org_model(self.model).named_parameters():
                     if param.grad is not None:
                         v_grad_norm = param.grad.data.norm(2).item()
                         max_grad_norm = max(max_grad_norm, v_grad_norm)
@@ -284,7 +285,7 @@ class SimpleVideoGenerationExperiment:
 
             # Log gradidents
             if accelerator.is_main_process and self.logger and log_grad_norm_freq and self.global_step % log_grad_norm_freq == 0:
-                norms = grad_norm(self.model.diffusion_model, norm_type=2)
+                norms = grad_norm(get_org_model(self.model).diffusion_model, norm_type=2)
                 self.log_dict(norms, None)
 
             # Optimization step
@@ -297,15 +298,15 @@ class SimpleVideoGenerationExperiment:
                 if self.ema:
                     self.ema.step(accelerator.unwrap_model(self.model))
 
+                # Save checkpoints 
+                if checkpointing_freq and self.global_step % checkpointing_freq == 0:
+                    self.save_checkpoint(self.global_step, accelerator, save_top_k)
+
                 # Validation step
                 if val_freq and self.global_step % val_freq == 0:
                     accelerator.wait_for_everyone()
-                    if accelerator.is_main_process:
-                        self.run_validation(val_loader, accelerator)
-
-                # Save checkpoints
-                if checkpointing_freq and self.global_step % checkpointing_freq == 0:
-                    self.save_checkpoint(self.global_step, accelerator, save_top_k)
+                    # if accelerator.is_main_process:
+                    self.run_validation(val_loader, accelerator)
 
                 self.global_step += 1
 
@@ -366,12 +367,17 @@ class SimpleVideoGenerationExperiment:
                 if i >= num_validate_batches:
                     break
                 
-                if (i + 1 ) % 10 == 0:
+                if (i + 1) % 10 == 0:
                     logger.info(f"Validation batch {i + 1}/{num_validate_batches}...")
                 # Preprocess
                 batch = model.on_after_batch_transfer(batch, i)
-                denoising_output, all_videos = model.new_validation_step(batch, i, namespace="validation")
-
+                denoising_output, all_videos = model.new_validation_step(batch, i, accelerator, namespace="validation")
+                if denoising_output is None and all_videos is None:
+                    # not main process
+                    logger.info('not main process, skipping validation step', main_process_only=False)
+                    continue
+                
+                logger.info('main process validation step', main_process_only=False)
                 # Process denoising output
                 total_loss += denoising_output["loss"].item()
                 if "diff_loss" in denoising_output:
@@ -450,11 +456,11 @@ class SimpleVideoGenerationExperiment:
             context_mask = torch.zeros(videos.shape[1]).bool().to(videos.device)
             match task:
                 case "prediction":
-                    context_mask[: self.model.n_context_frames] = True
+                    context_mask[: get_org_model(self.model).n_context_frames] = True
                 case "interpolation":
                     context_mask[[0, -1]] = True
-            if self.model.logging.n_metrics_frames is not None:
-                context_mask = context_mask[: self.model.logging.n_metrics_frames]
+            if get_org_model(self.model).logging.n_metrics_frames is not None:
+                context_mask = context_mask[: get_org_model(self.model).logging.n_metrics_frames]
             metric(videos, gt_videos, context_mask=context_mask)
 
     def log_dict(self, dictionary: Dict[str, Union[float, torch.Tensor]], namespace: str, is_print=False) -> None:
@@ -490,7 +496,7 @@ class SimpleVideoGenerationExperiment:
         cut_videos = lambda x: x[:num_videos_to_log]
 
         if context_frames is None:
-            context_frames=self.model.n_context_frames if task == "prediction" else torch.tensor([0, n_frames - 1], device=all_videos["gt"].device, dtype=torch.long)
+            context_frames=get_org_model(self.model).n_context_frames if task == "prediction" else torch.tensor([0, n_frames - 1], device=all_videos["gt"].device, dtype=torch.long)
 
 
         for task in self.tasks:
@@ -602,3 +608,12 @@ def make_infinite_loader(dataloader):
     while True:
         for batch in dataloader:
             yield batch
+
+def get_org_model(model: pl.LightningModule) -> pl.LightningModule:
+    """
+    Get the original model from the wrapped model.
+    This is useful when you want to access the original model's methods or attributes.
+    """
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        return model.module
+    return model
