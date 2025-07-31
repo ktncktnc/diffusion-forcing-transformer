@@ -41,12 +41,10 @@ from utils.logging_utils import log_video
 from accelerate import Accelerator, PartialState, DistributedDataParallelKwargs
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
-# from accelerate.utils.other import TORCH_SAFE_GLOBALS
-# import omegaconf
-
-# torch.serialization.add_safe_globals(TORCH_SAFE_GLOBALS)
-# torch.serialization.add_safe_globals([omegaconf.ListConfig, omegaconf.base.ContainerMetadata, Any])
 from lightning.pytorch.callbacks import ModelSummary
+
+os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
+
 
 rank_zero_print = print
 logger = get_logger(__name__)
@@ -151,7 +149,8 @@ class SimpleVideoGenerationExperiment:
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
         accelerator = Accelerator(
             mixed_precision=self.cfg.experiment.training.precision,
-            kwargs_handlers=[ddp_kwargs]
+            gradient_accumulation_steps=self.cfg.experiment.training.optim.accumulate_grad_batches,
+            # kwargs_handlers=[ddp_kwargs]
         )
         logger.info(f"  Configuration: {self.cfg}")
 
@@ -252,12 +251,22 @@ class SimpleVideoGenerationExperiment:
             batch = get_org_model(self.model).on_after_batch_transfer(batch, self.global_step)
 
             # Training step
-            loss_dict = get_org_model(self.model).training_step(batch, self.global_step)
-            loss = loss_dict["loss"]
-            accelerator.backward(loss)
+            with accelerator.accumulate(self.model):
+                loss_dict = get_org_model(self.model).training_step(batch, self.global_step)
+                loss = loss_dict["loss"]
+                accelerator.backward(loss)
+
+                # Clip gradients if specified
+                if gradient_clip_val is not None and accelerator.sync_gradients:
+                    accelerator.clip_grad_norm_(self.model.parameters(), gradient_clip_val)
+
+                # Optimization step
+                optimizer.step()
+                lr_scheduler.step() if lr_scheduler else None
+                optimizer.zero_grad()
 
             # Log loss and lr
-            if log_loss_freq and self.global_step % log_loss_freq == 0:
+            if accelerator.is_main_process and log_loss_freq and self.global_step % log_loss_freq == 0:
                 if self.logger:
                     log_loss_dict = {'training/loss': loss.item()}
                     if 'diff_loss' in loss_dict:
@@ -279,19 +288,10 @@ class SimpleVideoGenerationExperiment:
                     self.logger.log_metrics({"training/max_grad_norm": max_grad_norm}, step=self.global_step)
                 logger.info(f"Step: {self.global_step}, max_grad_norm: {max_grad_norm:.4f}")
 
-            # Clip gradients if specified
-            if gradient_clip_val is not None and accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(self.model.parameters(), gradient_clip_val)
-
             # Log gradidents
             if accelerator.is_main_process and self.logger and log_grad_norm_freq and self.global_step % log_grad_norm_freq == 0:
                 norms = grad_norm(get_org_model(self.model).diffusion_model, norm_type=2)
                 self.log_dict(norms, None)
-
-            # Optimization step
-            optimizer.step()
-            lr_scheduler.step() if lr_scheduler else None
-            optimizer.zero_grad()
 
             if accelerator.sync_gradients:
                 # EMA update
@@ -404,9 +404,6 @@ class SimpleVideoGenerationExperiment:
                 if self.logger and num_videos_to_log > 0:
                     self.log_videos(all_videos, namespace=namespace, context_frames=model.n_context_frames, global_step=i)
                 
-                
-                accelerator.wait_for_everyone()
-                #TODO: gather distributed data if needed
                 # Update metrics
                 self.update_metrics(all_videos)
         
