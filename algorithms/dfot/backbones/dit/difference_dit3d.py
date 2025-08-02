@@ -61,7 +61,7 @@ class DifferenceDiT3D(BaseBackbone):
         self.diff_embedder = LabelEmbedding(
                 2,
                 self.cfg.hidden_size,
-                dropout_prob=self.cfg.get("external_cond_dropout", 0.0),
+                dropout_prob=0.0,
             )
 
         self.dit_base = DiTBase(
@@ -143,7 +143,7 @@ class DifferenceDiT3D(BaseBackbone):
 
     def create_diff_index(self, x: torch.Tensor, diff_first=True) -> torch.Tensor:
         """
-        Create a tensor of shape (B, T, 1) with 0 for x and 1 for diff.
+        Create a tensor of shape (B,T) with 0 for x and 1 for diff.
         """
         batch_size, time_steps = x.shape[:2]
         time_steps = time_steps // 2  # Assuming x and diff are interleaved
@@ -156,6 +156,13 @@ class DifferenceDiT3D(BaseBackbone):
             return torch.cat(x, dim=1)
         else:
             raise ValueError(f"Unsupported merge type: {self.merge_type}. Supported types are 'concat' and 'interleaved'.")
+        
+    def make_diff_index_embedding(self, x: torch.Tensor, diff_first=True) -> torch.Tensor:
+        idx = self.create_diff_index(x, diff_first=diff_first)
+        idx = rearrange(idx, "b t -> (b t)")
+        diff_emb = self.diff_embedder(idx)
+        diff_emb = rearrange(diff_emb, "(b t) c -> b t c", b=x.shape[0])
+        return diff_emb
 
     def forward(
         self,
@@ -167,14 +174,12 @@ class DifferenceDiT3D(BaseBackbone):
     ) -> torch.Tensor:
         input_batch_size = x.shape[0]
         length = x.shape[1]
-
-        diff_index = self.create_diff_index(x, diff_first=True)
+        diff_emb = self.make_diff_index_embedding(x, diff_first=True)
         x = rearrange(x, "b t c h w -> (b t) c h w")
 
         x = self.patch_embedder(x)
         x = rearrange(x, "(b t) p c -> b (t p) c", b=input_batch_size)
         height, width = self.patch_embedder.grid_size
-        diff_emb = self.diff_embedder(diff_index)
         emb = diff_emb + self.noise_level_pos_embedding(noise_levels)
         if external_cond is not None:
             if self.external_cond_type == 'label':

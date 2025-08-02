@@ -260,12 +260,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
             # TODO: unconditional 
             save_attention_maps(attn_maps, self.cfg.save_attn_map.attn_map_dir, False, batch_idx)
 
-        if accelerator.is_main_process:
-            denoising_output = accelerator.gather_for_metrics(denoising_output)
-            all_videos = accelerator.gather_for_metrics(all_videos)
-            return denoising_output, all_videos
-        else:
-            return None, None
+        return denoising_output, all_videos
 
 
     def _eval_denoising(self, batch, batch_idx, namespace="training") -> None:

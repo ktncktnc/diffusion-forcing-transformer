@@ -62,6 +62,7 @@ class VideoMetric(nn.Module):
         registry: SharedVideoMetricModelRegistry,
         metric_types: List[str] | List[VideoMetricType],
         split_batch_size: int = 16,
+        torchmetrics_kwargs: Optional[dict] = None,
     ):
         super().__init__()
         modules = {}
@@ -70,24 +71,24 @@ class VideoMetric(nn.Module):
             match metric_type:
                 case VideoMetricType.LPIPS:
                     module = LearnedPerceptualImagePatchSimilarity(
-                        registry=registry, normalize=True
+                        registry=registry, normalize=True, **(torchmetrics_kwargs or {})
                     )
                 case VideoMetricType.FID:
-                    module = FrechetInceptionDistance(registry=registry, normalize=True)
+                    module = FrechetInceptionDistance(registry=registry, normalize=True, **(torchmetrics_kwargs or {}))
                 case VideoMetricType.FVMD:
-                    module = FrechetVideoMotionDistance(registry=registry)
+                    module = FrechetVideoMotionDistance(registry=registry, **(torchmetrics_kwargs or {}))
                 case VideoMetricType.VBENCH | VideoMetricType.REAL_VBENCH:
-                    module = VBench(registry=registry)
+                    module = VBench(registry=registry, **(torchmetrics_kwargs or {}))
                 case VideoMetricType.FVD:
-                    module = FrechetVideoDistance()
+                    module = FrechetVideoDistance(**(torchmetrics_kwargs or {}))
                 case VideoMetricType.IS | VideoMetricType.REAL_IS:
-                    module = InceptionScore()
+                    module = InceptionScore(**(torchmetrics_kwargs or {}))
                 case VideoMetricType.MSE:
-                    module = MeanSquaredError()
+                    module = MeanSquaredError(**(torchmetrics_kwargs or {}))
                 case VideoMetricType.SSIM:
-                    module = StructuralSimilarityIndexMeasure(data_range=1.0)
+                    module = StructuralSimilarityIndexMeasure(data_range=1.0, **(torchmetrics_kwargs or {}))
                 case VideoMetricType.PSNR:
-                    module = PeakSignalNoiseRatio(data_range=1.0)
+                    module = PeakSignalNoiseRatio(data_range=1.0, **(torchmetrics_kwargs or {}))
                 case _:
                     raise ValueError(f"Unknown video metric type: {metric_type}")
             registry.register_for_metric(metric_type)

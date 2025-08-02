@@ -155,18 +155,8 @@ class DifferenceDFoTVideo(BaseVideoAlgo):
         # and log the generated videos and metrics.
         all_videos = self._sample_all_videos(batch, batch_idx, namespace, n_context_tokens=self.n_context_tokens)
         # self._log_videos(all_videos, namespace, self.n_context_frames)
-        
-        # if self.cfg.save_attn_map.enabled:
-        #     # TODO: unconditional 
-        #     save_attention_maps(attn_maps, self.cfg.save_attn_map.attn_map_dir, False, batch_idx)
+        return denoising_output, all_videos
 
-        # return two outputs: denoising output and all_videos
-        if accelerator.is_main_process:
-            denoising_output = accelerator.gather_for_metrics(denoising_output)
-            all_videos = accelerator.gather_for_metrics(all_videos)
-            return denoising_output, all_videos
-        else:
-            return None, None
 
     # ---------------------------------------------------------------------
     # Sampling

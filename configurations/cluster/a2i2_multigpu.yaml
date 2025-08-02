@@ -1,0 +1,71 @@
+defaults:
+  - base_slurm
+
+params:
+  gpu: l40s
+  num_gpus: 2
+  num_cpus: 16
+  memory: 96G
+  time: "120:0:0" # Acceptable time formats include "minutes", "minutes:seconds", "hours:minutes:seconds", "days-hours", "days-hours:minutes" and "days-hours:minutes:seconds".
+  email: s224075134@deakin.edu.au
+
+launch_template: |
+  #!/bin/bash
+
+  #SBATCH -J {name}
+  #SBATCH -o {log_dir}/out_%j.out
+  #SBATCH -e {log_dir}/error_%j.err
+
+  #SBATCH --qos=batch-short
+  #SBATCH --ntasks-per-node=1
+  #SBATCH --cpus-per-task={num_cpus}
+  #SBATCH --mem={memory}
+  #SBATCH --gres=gpu:{gpu}:{num_gpus}
+
+  #SBATCH --mail-user={email}
+  #SBATCH --mail-type=FAIL
+  #SBATCH --time={time}
+
+  HYDRA_FULL_ERROR=1
+  GPUS_PER_NODE={num_gpus}
+  MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
+  MASTER_PORT=6000
+  NNODES=$SLURM_NNODES
+  NODE_RANK=$SLURM_PROCID 
+  WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
+
+  unset SLURM_MEM_PER_CPU
+  unset SLURM_MEM_PER_GPU
+  unset SLURM_MEM_PER_NODE
+  unset SLURM_CPU_BIND
+  env | grep SLURM_MEM 
+  
+
+  LAUNCHER="accelerate launch \
+    --multi_gpu \
+    --num_machines $NNODES \
+    --num_processes $WORLD_SIZE \
+    --main_process_ip "$MASTER_ADDR" \
+    --main_process_port $MASTER_PORT \
+    --num_processes $WORLD_SIZE \
+    --machine_rank $SLURM_PROCID \
+    --role $SLURMD_NODENAME: \
+    --rdzv_conf rdzv_backend=c10d \
+    --max_restarts 0 \
+    --tee 3 \
+  "
+
+  source ~/.bashrc
+  cd {project_root}
+  source venv/bin/activate
+  
+  SRUN_ARGS=" \
+    --wait=60 \
+    --kill-on-bad-exit=1 \
+    "
+
+  CMD="main.py {python_args}"
+  
+  echo srun $SRUN_ARGS --jobid $SLURM_JOB_ID bash -c "$LAUNCHER $CMD"
+  
+  clear; srun $SRUN_ARGS --jobid $SLURM_JOB_ID bash -c "$LAUNCHER $CMD"

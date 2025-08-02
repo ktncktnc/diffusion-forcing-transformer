@@ -32,7 +32,8 @@ from datasets.video import (
     DMLabAdvancedVideoDataset,
     TaichiAdvancedVideoDataset
 )
-from datetime import datetime
+import gc
+import datetime
 import time
 from torchsummary import summary
 
@@ -115,10 +116,12 @@ class SimpleVideoGenerationExperiment:
         for task in self.tasks:
             match task:
                 case "prediction":
+                    # NOTE: disable sync_on_compute because it will cause OOM error when using torchmetrics with accelerator
                     metrics_prediction = VideoMetric(
                         registry,
                         metric_types,
                         split_batch_size=self.cfg.algorithm.logging.metrics_batch_size,
+                        torchmetrics_kwargs={'sync_on_compute': False}
                     )
                     metrics_prediction = metrics_prediction.to(device)
                     # freeze the metrics model
@@ -146,11 +149,14 @@ class SimpleVideoGenerationExperiment:
         return BaseDataModule(self.cfg, self.compatible_datasets)
 
     def training(self) -> None:
-        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+        from accelerate.utils import InitProcessGroupKwargs
+        timeout = InitProcessGroupKwargs(timeout=datetime.timedelta(minutes=15))
         accelerator = Accelerator(
             mixed_precision=self.cfg.experiment.training.precision,
             gradient_accumulation_steps=self.cfg.experiment.training.optim.accumulate_grad_batches,
-            # kwargs_handlers=[ddp_kwargs]
+            kwargs_handlers=[timeout],
+
+
         )
         logger.info(f"  Configuration: {self.cfg}")
 
@@ -350,14 +356,16 @@ class SimpleVideoGenerationExperiment:
             self.ema.store(model)
             self.ema.copy_to(model)
 
+        max_num_videos = self.cfg.algorithm.logging.max_num_videos // accelerator.num_processes
         # Load required components for validation
         model.new_on_validation_epoch_start()
-        logger.info(f'len(val_loader) {len(val_loader)}')
+        logger.info(f'len(val_loader) {len(val_loader)}', main_process_only=False)
         num_validate_batches = min(len(val_loader), self.cfg.experiment.validation.limit_batch)
 
-        logger.info("********** Starting validation... **********")
-        logger.info(f"Num batches: {num_validate_batches}")
+        logger.info("********** Starting validation... **********", main_process_only=False)
+        logger.info(f"Num batches: {num_validate_batches}", main_process_only=False)
 
+        # total_batch = 0
         model.eval()
         with torch.no_grad():
             total_loss = 0.0
@@ -368,54 +376,70 @@ class SimpleVideoGenerationExperiment:
                     break
                 
                 if (i + 1) % 10 == 0:
-                    logger.info(f"Validation batch {i + 1}/{num_validate_batches}...")
+                    logger.info(f"Validation batch {i + 1}/{num_validate_batches}...", main_process_only=False)
                 # Preprocess
                 batch = model.on_after_batch_transfer(batch, i)
                 denoising_output, all_videos = model.new_validation_step(batch, i, accelerator, namespace="validation")
-                if denoising_output is None and all_videos is None:
-                    # not main process
-                    logger.info('not main process, skipping validation step', main_process_only=False)
-                    continue
-                
-                logger.info('main process validation step', main_process_only=False)
-                # Process denoising output
-                total_loss += denoising_output["loss"].item()
-                if "diff_loss" in denoising_output:
-                    total_diff_loss += denoising_output["diff_loss"].item()
-                if "xs_loss" in denoising_output:
-                    total_xs_loss += denoising_output["xs_loss"].item()
-                gt_videos = denoising_output["gts"]
-                recons = denoising_output["recons"]
-                num_videos_to_log = min(self.cfg.algorithm.logging.max_num_videos - self.num_logged_videos, gt_videos.shape[0])
 
-                if self.logger and num_videos_to_log > 0:
-                    log_video(
-                        recons[:num_videos_to_log],
-                        gt_videos[:num_videos_to_log],
-                        step=self.global_step,
-                        namespace=f"{namespace}_denoising_vis",
-                        logger=self.logger.experiment,
-                        indent=self.num_logged_videos,
-                        captions="denoised | gt",
-                        resize_to=(64, 64),
-                    )
-
-                # Log samples
-                if self.logger and num_videos_to_log > 0:
-                    self.log_videos(all_videos, namespace=namespace, context_frames=model.n_context_frames, global_step=i)
+                loss_scalar = denoising_output["loss"].mean()
+                diff_loss_scalar = denoising_output.get("diff_loss", torch.tensor(0.0)).mean() if "diff_loss" in denoising_output else torch.tensor(0.0)
+                xs_loss_scalar = denoising_output.get("xs_loss", torch.tensor(0.0)).mean() if "xs_loss" in denoising_output else torch.tensor(0.0)
                 
-                # Update metrics
-                self.update_metrics(all_videos)
+                # Gather only the scalar losses (very small memory footprint)
+                gathered_loss = accelerator.gather_for_metrics(loss_scalar)
+                gathered_diff_loss = accelerator.gather_for_metrics(diff_loss_scalar)
+                gathered_xs_loss = accelerator.gather_for_metrics(xs_loss_scalar)
+                
+                # Accumulate losses on ALL processes
+                total_loss += gathered_loss.mean().item()
+                if gathered_diff_loss.sum().item() > 0:
+                    total_diff_loss += gathered_diff_loss.mean().item()
+                if gathered_xs_loss.sum().item() > 0:
+                    total_xs_loss += gathered_xs_loss.mean().item()
+                
+                gathered_videos = accelerator.gather_for_metrics(all_videos)
+
+                if accelerator.is_main_process:
+                    gt_videos = denoising_output["gts"]
+                    recons = denoising_output["recons"]
+                    num_videos_to_log = min(max_num_videos - self.num_logged_videos, gt_videos.shape[0])
+
+                    if self.logger and num_videos_to_log > 0:
+                        log_video(
+                            recons[:num_videos_to_log],
+                            gt_videos[:num_videos_to_log],
+                            step=self.global_step,
+                            namespace=f"{namespace}_denoising_vis",
+                            logger=self.logger.experiment,
+                            indent=self.num_logged_videos,
+                            captions="denoised | gt",
+                            resize_to=(64, 64),
+                        )
+
+                    # Log samples
+                    if self.logger and num_videos_to_log > 0:
+                        self.log_videos(all_videos, namespace=namespace, context_frames=model.n_context_frames, global_step=i)
+                
+                    # Update metrics
+                    self.update_metrics(gathered_videos)
+
+                del gathered_videos, all_videos, denoising_output
+                gc.collect()
+                torch.cuda.empty_cache()
+        
+        accelerator.wait_for_everyone()
         
         if accelerator.is_main_process:
             # Log average loss
             avg_loss = total_loss / num_validate_batches
             logger.info(f"Validation average loss: {avg_loss:.4f}")
             log_loss = {f"{namespace}/avg_loss": avg_loss}
+
             if total_diff_loss > 0:
                 avg_diff_loss = total_diff_loss / num_validate_batches
                 logger.info(f"Validation average diff loss: {avg_diff_loss:.4f}")
                 log_loss[f"{namespace}/avg_diff_loss"] = avg_diff_loss
+
             if total_xs_loss > 0:
                 avg_xs_loss = total_xs_loss / num_validate_batches
                 logger.info(f"Validation average xs loss: {avg_xs_loss:.4f}")
@@ -426,8 +450,8 @@ class SimpleVideoGenerationExperiment:
 
             # compute metrics
             for task in self.tasks:
-                result = self.metrics[task].log(task)
                 logger.info(f"Validation {task} metrics:")
+                result = self.metrics[task].log(task)
                 # Log metrics
                 self.log_dict(result, namespace, is_print=True)
 
