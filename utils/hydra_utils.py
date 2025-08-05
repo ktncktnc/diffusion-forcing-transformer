@@ -14,6 +14,8 @@ def _dict_to_str(d: dict) -> str:
         output += (
             f"{key}: {_dict_to_str(value) if isinstance(value, dict) else value}, "
         )
+    if len(output) == 1:  # if the dict is empty
+        return "{}"
     output = output[:-2] + "}"
     return output
 
@@ -30,6 +32,8 @@ def _yaml_to_cli(
     for key, value in OmegaConf.to_container(cfg).items():
         if value is None:
             value = "null"
+        elif value == '{}':
+            value = '{}'
         cli.append(
             f"++{prefix + '.' if prefix else ''}{key}={_dict_to_str(value) if isinstance(value, dict) else value}"
         )
@@ -81,6 +85,11 @@ def unwrap_shortcuts(
             # otherwise, the backbone could be re-overridden by
             # the backbone cfgs in dataset-experiment dependent cfgs
             new_argv += override_backbone(arg[19:])
+        elif arg.startswith("algorithm/vae="):
+            # this is a workaround to enable overriding the VAE in the command line
+            # otherwise, the VAE could be re-overridden by
+            # the vae cfgs in dataset-experiment dependent cfgs
+            new_argv += override_vae(arg[14:])
         else:
             new_argv.append(arg)
     print('new_argv', new_argv)
@@ -93,4 +102,12 @@ def override_backbone(name: str) -> list[str]:
     """
     return ["algorithm.backbone=null"] + _yaml_to_cli(
         f"configurations/algorithm/backbone/{name}.yaml", prefix="algorithm.backbone"
+    )
+
+def override_vae(name: str) -> list[str]:
+    """
+    Override the VAE with the specified name.
+    """
+    return ["algorithm.vae=null"] + _yaml_to_cli(
+        f"configurations/algorithm/{name}.yaml", prefix="algorithm.vae"
     )
