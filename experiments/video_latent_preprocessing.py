@@ -8,7 +8,9 @@ from datasets.video import (
 from algorithms.vae import ImageVAEPreprocessor, DCAEPreprocessor, AutoencoderKL, AutoencoderKLPreprocessor, Titok_KLPreprocessor
 from .base_exp import BaseLightningExperiment
 from .data_modules import ValDataModule
-
+import torch
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = True
 
 class VideoLatentPreprocessingExperiment(BaseLightningExperiment):
     """
@@ -28,7 +30,8 @@ class VideoLatentPreprocessingExperiment(BaseLightningExperiment):
         ucf_101=UCF101SimpleVideoDataset,
         dmlab=DMLabSimpleVideoDataset,
         bair=BAIRSimpleVideoDataset,
-        taichi=TaichiSimpleVideoDataset
+        taichi=TaichiSimpleVideoDataset,
+        test_taichi=TaichiSimpleVideoDataset,
     )
 
     data_module_cls = ValDataModule
