@@ -158,7 +158,7 @@ class SimpleVideoGenerationExperiment:
 
 
         )
-        logger.info(f"  Configuration: {self.cfg}")
+        logger.info(f"  Configuration: {dict(self.cfg)}")
 
         self.model: pl.LightningModule = self._build_algo()
 
@@ -245,9 +245,10 @@ class SimpleVideoGenerationExperiment:
         self.global_step = 1
         if self.ckpt_path:
             logger.info(f"Resuming from checkpoint: {self.ckpt_path}")
-            self.global_step = self.resume_checkpoint(accelerator, self.ckpt_path)
+            self.global_step = self.resume_checkpoint(accelerator, self.ckpt_path) + 1
             logger.info(f"Resumed global step: {self.global_step}")
 
+        logger.info("********** Starting training... **********")
         while self.global_step < self.cfg.experiment.training.max_steps+1:
             self.model.train()
             batch = next(train_yielder)
@@ -314,7 +315,7 @@ class SimpleVideoGenerationExperiment:
                     # if accelerator.is_main_process:
                     self.run_validation(val_loader, accelerator)
 
-                self.global_step += 1
+            self.global_step += 1
 
         # save final checkpoint
         self.save_checkpoint(self.global_step, accelerator, save_top_k)
@@ -382,13 +383,11 @@ class SimpleVideoGenerationExperiment:
                 denoising_output, all_videos = model.new_validation_step(batch, i, accelerator, namespace="validation")
 
                 loss_scalar = denoising_output["loss"].mean()
-                diff_loss_scalar = denoising_output.get("diff_loss", torch.tensor(0.0)).mean() if "diff_loss" in denoising_output else torch.tensor(0.0)
-                xs_loss_scalar = denoising_output.get("xs_loss", torch.tensor(0.0)).mean() if "xs_loss" in denoising_output else torch.tensor(0.0)
                 
                 # Gather only the scalar losses (very small memory footprint)
                 gathered_loss = accelerator.gather_for_metrics(loss_scalar)
-                gathered_diff_loss = accelerator.gather_for_metrics(diff_loss_scalar)
-                gathered_xs_loss = accelerator.gather_for_metrics(xs_loss_scalar)
+                gathered_diff_loss = accelerator.gather_for_metrics(denoising_output.get("diff_loss", torch.tensor(0.0)).mean())  if "diff_loss" in denoising_output else torch.tensor(0.0)
+                gathered_xs_loss = accelerator.gather_for_metrics(denoising_output.get("xs_loss", torch.tensor(0.0)).mean()) if "xs_loss" in denoising_output else torch.tensor(0.0)
                 
                 # Accumulate losses on ALL processes
                 total_loss += gathered_loss.mean().item()
