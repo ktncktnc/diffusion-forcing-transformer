@@ -3,6 +3,8 @@ defaults:
 
 name: kl_autoencoder
 pretrained_model_name_or_path: stabilityai/sd-vae-ft-ema
+pretrained_path: null
+batch_size: 4
 pretrained_kwargs: {}
 max_encode_length: 50 # number of frames that can be passed through the encoder at once
 logging:

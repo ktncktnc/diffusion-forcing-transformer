@@ -7,7 +7,8 @@
 dataset:
   resolution: 256
   latent:
-    suffix: artitok_taichi500k # 1cd9pgpb
+    suffix: new_artitok_taichi500k # kl_f8_autoencoder # artitok_taichi500k
+    # latent_dir: /scratch/s224075134/temporal_diffusion/datasets/test/test1_taichi_latent_32_new_artitok_taichi500k
 
 algorithm:
   pretrained_path: /scratch/s224075134/temporal_diffusion/AR-Diffusion/experiments/taichi_vae/ckpt_dir/checkpoint-500000/model.safetensors

@@ -8,7 +8,7 @@ latent:
   enabled: True
   suffix: artitok_taichi500k
   num_channels: 4
-  shape: [4, 1, 32]
+  # shape: [4, 1, 32]
 save_dir: /scratch/s224075134/temporal_diffusion/datasets/video/taichi
 max_frames: 16
 frame_skip: 1

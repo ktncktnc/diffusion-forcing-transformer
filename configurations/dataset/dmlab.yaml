@@ -17,5 +17,5 @@ latent:
   suffix: 17035ae5 # kl_autoencoder_a1d993488, 17035ae5
   num_channels: 32 # 4, 32
   downsampling_factor: [1, 8] 
-  type: pre_17035ae5
+  type: pre_sample
 subdataset_size: null

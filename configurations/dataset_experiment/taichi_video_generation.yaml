@@ -5,22 +5,23 @@
 # the values here will override individual yamls files for dataset, algorithm and experiment.
 # useful for dataset-specific overrides
 
-defaults:
-  - ../algorithm@algorithm.vae: titok_kl_preprocessor
+# defaults:
+#   - ../algorithm@algorithm.vae: titok_kl_preprocessor # kl_autoencoder_preprocessor, titok_kl_preprocessor
 
 dataset:
   # num_eval_videos: 1000
   subdataset_size: null
   latent:
     enabled: True
-    suffix: artitok_taichi500k
+    suffix: artitok_taichi500k #kl_f8_autoencoder, artitok_taichi500k
     type: pre_sample
+    shape: [4, 1, 32]
 
 algorithm:
-  latent_shape: [1, 32, 4] # fixed latent shape, if not null
+  # latent_shape: [1, 32, 4] # fixed latent shape, if not null, only for titok
   num_sanity_val_steps: 1
   lr_scheduler:
-    num_warmup_steps: 500
+    num_warmup_steps: 2000
     num_training_steps: ${experiment.training.max_steps}
   weight_decay: 0
   backbone:
@@ -36,29 +37,32 @@ algorithm:
     metrics: [fvd, is, fid, lpips, mse, ssim, psnr]
   vae:
     pretrained_path: /scratch/s224075134/temporal_diffusion/AR-Diffusion/experiments/taichi_vae/ckpt_dir/checkpoint-500000/model.safetensors
-    batch_size: 4
+    # pretrained_path: stabilityai/sd-vae-ft-ema
+    batch_size: 4 # 32, 4
 
 experiment:
   ema:
     enable: True
     decay: 0.999
   training:
-    max_steps: 100000
+    max_steps: 200000
     max_epochs: null
     lr: 1e-4
     batch_size: 16
+    optim:
+      accumulate_grad_batches: 2
     data:
       num_workers: 11
       shuffle: True
     checkpointing:
-      every_n_train_steps: 5000
+      every_n_train_steps: 10000
       every_n_epochs: null
       save_last: True
       save_top_k: 20
       monitor: "prediction/fvd"
   validation:
     batch_size: 16
-    val_every_n_step: 5000
+    val_every_n_step: 10000
     val_every_n_epoch: null
     data:
       num_workers: 1

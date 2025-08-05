@@ -37,7 +37,13 @@ VideoPreprocessingMp4FPS: int = 10
 
 
 def _dl_wrap(tarpath: str, videopath: str, line: str) -> None:
-    download_and_extract_archive(line, tarpath, videopath, remove_finished=True)
+    try:
+        download_and_extract_archive(line, tarpath, videopath, remove_finished=True)
+    except Exception as e:
+        print(f"Error downloading {line}: {e}")
+
+        # If the download fails, we can skip this video or handle it as needed.
+        # For now, we just print the error and continue.
 
 
 def _preprocess_video(

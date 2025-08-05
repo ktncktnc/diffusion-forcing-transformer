@@ -2,12 +2,12 @@ defaults:
   - base_slurm
 
 params:
-  gpu: l40s
+  gpu_type: l40s
   num_gpus: 2
   num_cpus: 16
   memory: 96G
   time: "120:0:0" # Acceptable time formats include "minutes", "minutes:seconds", "hours:minutes:seconds", "days-hours", "days-hours:minutes" and "days-hours:minutes:seconds".
-  email: s224075134@deakin.edu.au
+  email: doremon6a1@gmail.com
 
 launch_template: |
   #!/bin/bash
@@ -20,7 +20,7 @@ launch_template: |
   #SBATCH --ntasks-per-node=1
   #SBATCH --cpus-per-task={num_cpus}
   #SBATCH --mem={memory}
-  #SBATCH --gres=gpu:{gpu}:{num_gpus}
+  #SBATCH --gres=gpu:{gpu_type}:{num_gpus}
 
   #SBATCH --mail-user={email}
   #SBATCH --mail-type=FAIL

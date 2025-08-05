@@ -38,14 +38,18 @@ class BaseVideoDataset(torch.utils.data.Dataset, ABC):
         split: SPLIT = "training",
     ):
         super().__init__()
+        print(f"Initializing {self.__class__.__name__} for split {split}")
         self.cfg = cfg
         self.split = split
         self.resolution = cfg.resolution
         self.latent_resolution = cfg.resolution // cfg.latent.downsampling_factor[1]
         self.save_dir = Path(cfg.save_dir)
-        self.latent_dir = self.save_dir.with_name(
-            f"{self.save_dir.name}_latent_{self.latent_resolution}{'_' + cfg.latent.suffix if cfg.latent.suffix else ''}"
-        )
+        if hasattr(cfg.latent, "latent_dir") and self.cfg.latent.latent_dir is not None:
+            self.latent_dir = Path(self.cfg.latent.latent_dir)
+        else:
+            self.latent_dir = self.save_dir.with_name(
+                f"{self.save_dir.name}_latent_{self.latent_resolution}{'_' + cfg.latent.suffix if cfg.latent.suffix else ''}"
+            )
         self.split_dir = self.save_dir / split
         self.metadata_dir = self.save_dir / "metadata"
 

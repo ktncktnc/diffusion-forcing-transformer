@@ -10,7 +10,7 @@ latent:
   suffix: null
   downsampling_factor: [4, 8]
   num_channels: 16
-save_dir: data/kinetics-600
+save_dir: /scratch/s224075134/temporal_diffusion/datasets/video/kinetics-600 # /scratch/DataSets/kinetics-600
 max_frames: 17
 context_length: 5
 resolution: 128
