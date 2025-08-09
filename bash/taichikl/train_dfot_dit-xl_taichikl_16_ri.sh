@@ -1,5 +1,5 @@
 python main.py \
-    '+name=DFOT_DiT/XL_TAICHIKL_16_RI' \
+    '+name=DFOT_DiT-XL_TAICHIKL_16_RI' \
     'algorithm=dfot_video' \
     'experiment=video_generation' \
     \

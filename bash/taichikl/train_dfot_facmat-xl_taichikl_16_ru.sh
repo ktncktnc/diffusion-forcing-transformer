@@ -16,7 +16,7 @@ python main.py \
     algorithm.vae.pretrained_path=stabilityai/sd-vae-ft-ema \
     algorithm.vae.batch_size=16 \
     \
-    algorit hm.noise_level=random_uniform \
+    algorithm.noise_level=random_uniform \
     algorithm.variable_context.enabled=True \
     \
     experiment.training.batch_size=8 \

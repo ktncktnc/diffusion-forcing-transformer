@@ -1,6 +1,6 @@
 python main.py \
-    '+name=Diffv2DFOT_FacMat-XL_TAICHIKL_16_RU' \
-    'algorithm=difference_dfot_video' \
+    '+name=DFOT_FacDiT-XL_TAICHIKL_16_RU' \
+    'algorithm=dfot_video' \
     'experiment=video_generation' \
     \
     dataset=taichi \
@@ -8,8 +8,8 @@ python main.py \
     dataset.latent.suffix=kl_f8_autoencoder \
     dataset.latent.shape=null \
     \
-    algorithm/backbone=difference_dit3d_factorized_matrix \
-    '@FacMatDiT/XL' \
+    algorithm/backbone=dit3d_factorized_attention \
+    '@DiT/XL' \
     algorithm.backbone.patch_size=2 \
     \
     algorithm/vae=kl_autoencoder_preprocessor \
