@@ -1,0 +1,8 @@
+algorithm:
+  backbone:
+    hidden_size: null
+    embed_col_dim: 16
+    embed_row_dim: 768
+    num_col_heads: 1
+    num_row_heads: 12
+    depth: 12

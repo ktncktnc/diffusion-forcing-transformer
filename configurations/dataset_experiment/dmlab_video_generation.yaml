@@ -49,6 +49,7 @@ experiment:
     max_steps: 500000
     data:
       shuffle: False
+      num_workers: 11
     checkpointing:
       every_n_epochs: null
       every_n_train_steps: 25000
@@ -62,8 +63,8 @@ experiment:
     validate_history_free: True
     limit_batch: 50
     data:
-      num_workers: 0
+      num_workers: 1
   test:
     batch_size: 16
     data:
-      num_workers: 0
+      num_workers: 1

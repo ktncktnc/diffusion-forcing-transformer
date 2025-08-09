@@ -1,8 +1,8 @@
 algorithm:
   backbone:
-    hidden_size: 768
-    embed_col_dim: 8
+    hidden_size: null
+    embed_col_dim: 32
     embed_row_dim: 768
     num_col_heads: 1
-    num_row_heads: 8
+    num_row_heads: 12
     depth: 12

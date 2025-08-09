@@ -26,3 +26,5 @@ max_encode_length: 700 # number of frames that can be passed through the encoder
 logging:
   max_video_length: 30
   every_n_batch: 10
+use_fp16: False
+batch_size: 4

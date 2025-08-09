@@ -54,6 +54,7 @@ experiment:
     batch_size: 8
     max_epochs: 10
     data:
+      num_workers: 11
       shuffle: False
     checkpointing:
       every_n_epochs: 1
@@ -68,8 +69,8 @@ experiment:
     validate_history_free: True
     limit_batch: 50
     data:
-      num_workers: 0
+      num_workers: 1
   test:
     batch_size: 16
     data:
-      num_workers: 0
+      num_workers: 1
