@@ -126,11 +126,20 @@ class DiTBase(nn.Module):
         self.num_heads = num_heads
 
         if self.is_matrix_attention:
-            self.matrix_block = kwargs.get("matrix_block", None)
-            self.embed_col_dim = kwargs.get("embed_col_dim", self.num_patches)
-            self.embed_row_dim = kwargs.get("embed_row_dim", hidden_size)
-            self.num_col_heads = self.kwargs.get("num_col_heads", num_heads)
-            self.num_row_heads = self.kwargs.get("num_row_heads", num_heads)
+            self.matrix_block = kwargs.get("matrix_block")
+            self.embed_col_dim = kwargs.get("embed_col_dim")
+            self.embed_row_dim = kwargs.get("embed_row_dim")
+            self.num_col_heads = self.kwargs.get("num_col_heads")
+            self.num_row_heads = self.kwargs.get("num_row_heads")
+            self.spatial_mlp_ratio = kwargs.get("spatial_mlp_ratio")
+
+            assert self.matrix_block in matrix_blocks, f"Unknown matrix block {self.matrix_block}"
+            assert self.embed_col_dim is not None and self.embed_row_dim is not None, "embed_col_dim and embed_row_dim must be specified for matrix attention"
+            assert self.num_col_heads is not None and self.num_row_heads is not None, "num_col_heads and num_row_heads must be specified for matrix attention"
+            assert self.embed_col_dim % self.num_col_heads == 0, "embed_col_dim must be divisible by num_col_heads"
+            assert self.embed_row_dim % self.num_row_heads == 0, "embed_row_dim must be divisible by num_row_heads"
+            assert self.spatial_mlp_ratio is not None, "spatial_mlp_ratio must be specified for matrix attention"
+
             self.matrix_dim = self.embed_col_dim // self.num_col_heads * self.embed_row_dim // self.num_row_heads
             self.flatten_matrix_rope = kwargs.get("flatten_matrix_rope")
             self.matrix_multi_token = kwargs.get("matrix_multi_token")
@@ -143,6 +152,7 @@ class DiTBase(nn.Module):
 
         self.blocks = []
         for i in range(depth):
+            # Add Matrix DiT blocks for matrix attention variants
             if self.is_full_matrix:
                 block = matrix_blocks[self.matrix_block]
                 self.blocks.append(block(
@@ -159,13 +169,23 @@ class DiTBase(nn.Module):
                     flatten_matrix_rope=self.flatten_matrix_rope,
                     matrix_multi_token=self.matrix_multi_token
                 ))
+            # Add DiT blocks for other variants.
+            # NOTE: if full DiT, will use MLP.
             else:
-                self.blocks.append(DiTBlock(
-                    hidden_size=hidden_size,
-                    num_heads=num_heads,
-                    mlp_ratio=(mlp_ratio if self.variant != "factorized_attention" else None),
-                    rope=self.rope,
-                ))
+                if self.is_matrix_factorized:
+                    self.blocks.append(DiTBlock(
+                        hidden_size=hidden_size,
+                        num_heads=num_heads,
+                        mlp_ratio=self.spatial_mlp_ratio,
+                        rope=self.rope,
+                    ))
+                else:
+                    self.blocks.append(DiTBlock(
+                        hidden_size=hidden_size,
+                        num_heads=num_heads,
+                        mlp_ratio=(mlp_ratio if self.variant not in ["factorized_attention"] else None),
+                        rope=self.rope,
+                    ))
         self.blocks = nn.ModuleList(self.blocks)
 
         if self.is_factorized:

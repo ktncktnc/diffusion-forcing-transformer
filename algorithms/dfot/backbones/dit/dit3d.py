@@ -35,7 +35,6 @@ class DiT3D(BaseBackbone):
             use_causal_mask=use_causal_mask,
         )
 
-        hidden_size = cfg.hidden_size
         self.patch_size = cfg.patch_size
         channels, resolution_h, resolution_w, *_ = x_shape
 
@@ -51,7 +50,7 @@ class DiT3D(BaseBackbone):
             img_size=(resolution_h, resolution_w),
             patch_size=self.patch_size,
             in_chans=self.in_channels,
-            embed_dim=hidden_size,
+            embed_dim=self.hidden_size,
             bias=True,
         )
 
@@ -62,7 +61,7 @@ class DiT3D(BaseBackbone):
             out_channels=out_channels,
             variant=cfg.variant,
             pos_emb_type=cfg.pos_emb_type,
-            hidden_size=hidden_size,
+            hidden_size=self.hidden_size,
             depth=cfg.depth,
             num_heads=cfg.get("num_heads", None),
             mlp_ratio=cfg.mlp_ratio,
@@ -104,16 +103,32 @@ class DiT3D(BaseBackbone):
             self.external_cond_embedding.apply(_mlp_init)
 
     @property
+    def is_matrix_attention(self) -> bool:
+        return self.cfg.variant in ["full_matrix_attention", "factorized_matrix_attention"]
+    @property
     def noise_level_dim(self) -> int:
         return 256
+    
+    @property
+    def hidden_size(self) -> int:
+        if self.is_matrix_attention:
+            return self.cfg.embed_row_dim
+        else:
+            return self.cfg.hidden_size
 
     @property
     def noise_level_emb_dim(self) -> int:
-        return self.cfg.hidden_size
+        if self.is_matrix_attention:
+            return self.cfg.embed_row_dim
+        else:
+            return self.cfg.hidden_size
 
     @property
     def external_cond_emb_dim(self) -> int:
-        return self.cfg.hidden_size if self.external_cond_dim else 0
+        if self.external_cond_dim:
+            return self.noise_level_emb_dim
+        else:
+            return 0
 
     def unpatchify(self, x: torch.Tensor) -> torch.Tensor:
         """

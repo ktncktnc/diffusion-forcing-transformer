@@ -37,7 +37,6 @@ class DifferenceDiT3D(BaseBackbone):
         )
         self.merge_type = cfg.merge_type
         assert self.merge_type in ["concat", "interleaved"], f"Unsupported merge type: {self.merge_type}"
-        hidden_size = cfg.hidden_size
         self.patch_size = cfg.patch_size
         channels, resolution_h, resolution_w, *_ = x_shape
 
@@ -53,16 +52,16 @@ class DifferenceDiT3D(BaseBackbone):
             img_size=(resolution_h, resolution_w),
             patch_size=self.patch_size,
             in_chans=self.in_channels,
-            embed_dim=hidden_size,
+            embed_dim=self.hidden_size,
             bias=True,
         )
 
         # Embed for x and diff tensors: 0 for x, 1 for diff
         self.diff_embedder = LabelEmbedding(
-                2,
-                self.cfg.hidden_size,
-                dropout_prob=0.0,
-            )
+            2,
+            self.hidden_size,
+            dropout_prob=0.0,
+        )
 
         self.dit_base = DiTBase(
             num_patches=self.num_patches,
@@ -71,12 +70,13 @@ class DifferenceDiT3D(BaseBackbone):
             out_channels=out_channels,
             variant=cfg.variant,
             pos_emb_type=cfg.pos_emb_type,
-            hidden_size=hidden_size,
+            hidden_size=self.hidden_size,
             depth=cfg.depth,
             num_heads=cfg.get("num_heads", None),
             mlp_ratio=cfg.mlp_ratio,
             learn_sigma=False,
             use_gradient_checkpointing=cfg.use_gradient_checkpointing,
+            spatial_mlp_ratio=cfg.get("spatial_mlp_ratio", None),
             embed_col_dim=cfg.get("embed_col_dim", None),
             embed_row_dim=cfg.get("embed_row_dim", None),
             num_col_heads=cfg.get("num_col_heads", None),
@@ -114,16 +114,33 @@ class DifferenceDiT3D(BaseBackbone):
             self.external_cond_embedding.apply(_mlp_init)
 
     @property
+    def is_matrix_attention(self) -> bool:
+        return self.cfg.variant in ["full_matrix_attention", "factorized_matrix_attention"]
+
+    @property
     def noise_level_dim(self) -> int:
         return 256
 
     @property
-    def noise_level_emb_dim(self) -> int:
-        return self.cfg.hidden_size
+    def hidden_size(self) -> int:
+        if self.is_matrix_attention:
+            return self.cfg.embed_row_dim
+        else:
+            return self.cfg.hidden_size
+
+    @property
+    def noise_level_emb_dim(self):
+        if self.is_matrix_attention:
+            return self.cfg.embed_row_dim
+        else:
+            return self.cfg.hidden_size
 
     @property
     def external_cond_emb_dim(self) -> int:
-        return self.cfg.hidden_size if self.external_cond_dim else 0
+        if self.external_cond_dim:
+            return self.noise_level_emb_dim
+        else:
+            return 0
 
     def unpatchify(self, x: torch.Tensor) -> torch.Tensor:
         """

@@ -322,6 +322,20 @@ class MatrixAttention(nn.Module):
         x = self.proj_drop(x)
 
         return x
+    
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(\n"
+            f"  (qkv_u): Parameter(shape={tuple(self.qkv_u.shape)})\n"
+            f"  (qkv_v): Parameter(shape={tuple(self.qkv_v.shape)})\n"
+            f"  (q_norm): {self.q_norm}\n"
+            f"  (k_norm): {self.k_norm}\n"
+            f"  (attn_drop): {self.attn_drop}\n"
+            f"  (proj_u): Parameter(shape={tuple(self.proj_u.shape)})\n"
+            f"  (proj_v): Parameter(shape={tuple(self.proj_v.shape)})\n"
+            f"  (proj_drop): {self.proj_drop}\n"
+            f")"
+        )
 
 class AdaLayerNorm(nn.Module):
     """
@@ -411,7 +425,7 @@ class DiTBlock(nn.Module):
         self.attn = Attention(
             hidden_size, num_heads=num_heads, qkv_bias=True, rope=rope, **block_kwargs
         )
-        self.use_mlp = mlp_ratio is not None
+        self.use_mlp = mlp_ratio is not None and mlp_ratio > 0.0
         if self.use_mlp:
             self.norm2 = AdaLayerNormZero(hidden_size)
             self.mlp = Mlp(
