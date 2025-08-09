@@ -86,7 +86,7 @@ class BaseDataModule(pl.LightningDataModule):
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=split_cfg.batch_size,
-            # num_workers=self._get_num_workers(split_cfg.data.num_workers),
+            num_workers=self._get_num_workers(split_cfg.data.num_workers),
             shuffle=self._get_shuffle(dataset, split_cfg.data.shuffle),
             # persistent_workers=split == "training",
             worker_init_fn=lambda worker_id: (

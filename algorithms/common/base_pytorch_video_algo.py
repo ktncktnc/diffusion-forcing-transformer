@@ -461,6 +461,15 @@ class BaseVideoAlgo(BasePytorchAlgo):
         
         self.val_metrics = None
 
+    def new_on_validation_epoch_end(self, namespace="validation") -> None:
+        self.generator = None
+        if self.is_latent_diffusion and not self.is_latent_online:
+            self.vae = None
+
+        if self.cfg.save_attn_map:
+            clear_hooks(self.diffusion_model.model)
+
+
     # ---------------------------------------------------------------------
     # Test step
     # ---------------------------------------------------------------------
@@ -899,10 +908,7 @@ class BaseVideoAlgo(BasePytorchAlgo):
         scheduling_matrix = F.pad(
             scheduling_matrix, (0, padding, 0, 0), value=self.timesteps - 1
         )
-        # torch.set_printoptions(profile="full", linewidth=20000)
-        # print(scheduling_matrix)
-        # exit(0)
-
+        
         return scheduling_matrix
 
     def _generate_interleaved_scheduling_matrix(

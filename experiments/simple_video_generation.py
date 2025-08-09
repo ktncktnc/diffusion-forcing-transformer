@@ -36,6 +36,7 @@ import gc
 import datetime
 import time
 from torchsummary import summary
+import omegaconf
 
 from utils.torch_utils import freeze_model
 from utils.logging_utils import log_video
@@ -155,10 +156,8 @@ class SimpleVideoGenerationExperiment:
             mixed_precision=self.cfg.experiment.training.precision,
             gradient_accumulation_steps=self.cfg.experiment.training.optim.accumulate_grad_batches,
             kwargs_handlers=[timeout],
-
-
         )
-        logger.info(f"  Configuration: {dict(self.cfg)}")
+        logger.info(f"  Configuration: {omegaconf.OmegaConf.to_yaml(self.cfg)}")
 
         self.model: pl.LightningModule = self._build_algo()
 
@@ -211,14 +210,9 @@ class SimpleVideoGenerationExperiment:
         logger.info("********** Starting training... **********")
         logger.info(f"  Model: {self.model}")
         # Log parameters
-        for p in params['trainable']:
-            logger.info(f"  Trainable parameter: {p}")
-        for p in params['frozen']:
-            logger.info(f"  Frozen parameter: {p}")
-
-        logger.info(f"  Total trainable parameters: {params['total_trainable']/ 1e6} M")
-        logger.info(f"  Total frozen parameters: {params['total_frozen'] / 1e6} M")
-        logger.info(f"  Total parameters: {params['total'] / 1e6} M")
+        logger.info(f"  Total trainable parameters: {params['total_trainable']:,d}")
+        logger.info(f"  Total frozen parameters: {params['total_frozen']:,d}")
+        logger.info(f"  Total parameters: {params['total']:,d}")
         logger.info(f'  Model x_shape: {get_org_model(self.model).x_shape}')
         logger.info(f"  Model max_tokens: {get_org_model(self.model).max_tokens}")
         logger.info(f"  Model external_cond_type: {get_org_model(self.model).external_cond_type}")
@@ -238,8 +232,10 @@ class SimpleVideoGenerationExperiment:
             logger.info(f"  Learning Rate Scheduler {lr_scheduler}")
         logger.info(f"  Dataset: {self.data_module.root_cfg.dataset._name}")
         logger.info(f"  Num training steps {self.cfg.experiment.training.max_steps}")
+        logger.info(f"  Batch size: {self.cfg.experiment.training.batch_size}")
         logger.info(f"  Num examples: {len(train_loader.dataset)}")
         logger.info(f"  Num batches: {len(train_loader)}")
+        logger.info(f"  Num workers: {self.data_module._get_num_workers(self.cfg.experiment.training.data.num_workers)}")
         logger.info(f"  Gradient clipping value: {gradient_clip_val}")
 
         self.global_step = 1
@@ -252,7 +248,6 @@ class SimpleVideoGenerationExperiment:
         while self.global_step < self.cfg.experiment.training.max_steps+1:
             self.model.train()
             batch = next(train_yielder)
-
             # Preprocess
             # TODO: scaling data takes a lot of time, consider moving it to the dataset
             batch = get_org_model(self.model).on_after_batch_transfer(batch, self.global_step)
@@ -343,7 +338,12 @@ class SimpleVideoGenerationExperiment:
         self.metrics = self._build_metrics(device=device)
         self.model, val_loader = accelerator.prepare(self.model, val_loader)
         self.resume_checkpoint(accelerator, self.ckpt_path)
+        params = get_org_model(self.model).get_params()
 
+        logger.info(f"  Model: {self.model}")
+        logger.info(f"  Total trainable parameters: {params['total_trainable']:,d}")
+        logger.info(f"  Total frozen parameters: {params['total_frozen']:,d}")
+        logger.info(f"  Total parameters: {params['total']:,d}")
         logger.info(f"Sampling step: {self.cfg.algorithm.diffusion.sampling_timesteps}")
         logger.info(f"Scheduling matrix: {self.cfg.algorithm.scheduling_matrix}")
         self.run_validation(val_loader, accelerator)
@@ -360,11 +360,12 @@ class SimpleVideoGenerationExperiment:
         max_num_videos = self.cfg.algorithm.logging.max_num_videos // accelerator.num_processes
         # Load required components for validation
         model.new_on_validation_epoch_start()
-        logger.info(f'len(val_loader) {len(val_loader)}', main_process_only=False)
+        logger.info(f'len(val_loader) {len(val_loader)}', main_process_only=True)
         num_validate_batches = min(len(val_loader), self.cfg.experiment.validation.limit_batch)
 
-        logger.info("********** Starting validation... **********", main_process_only=False)
-        logger.info(f"Num batches: {num_validate_batches}", main_process_only=False)
+        logger.info("********** Starting validation... **********", main_process_only=True)
+        logger.info(f"  Batch size: {self.cfg.experiment.validation.batch_size}", main_process_only=True)
+        logger.info(f"  Num batches: {num_validate_batches}", main_process_only=True)
 
         # total_batch = 0
         model.eval()
@@ -456,9 +457,9 @@ class SimpleVideoGenerationExperiment:
 
         # Remove unnecessary components
         model.generator = None
-        model.vae = None
         model.num_logged_videos = 0
         self.num_logged_videos = 0
+        self.model.new_on_validation_epoch_end()
         model.train()
 
         # Restore EMA if it was used
@@ -469,6 +470,12 @@ class SimpleVideoGenerationExperiment:
         logger.info("********** Validation completed **********\n")
 
     def update_metrics(self, all_videos) -> None:
+        # only consider the first n_metrics_frames for evaluation
+        if get_org_model(self.model).logging.n_metrics_frames is not None:
+            all_videos = {
+                k: v[:, : get_org_model(self.model).logging.n_metrics_frames] for k, v in all_videos.items()
+            }
+
         gt_videos = all_videos["gt"]
         for task in self.tasks:
             metric = self.metrics[task]
