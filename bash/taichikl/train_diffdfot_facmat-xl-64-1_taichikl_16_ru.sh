@@ -1,6 +1,6 @@
 python main.py \
-    '+name=DFOT_FacDiT-XL_TAICHIKL_16_RU' \
-    'algorithm=dfot_video' \
+    '+name=Diffv2DFOT_FacMat-XL-64-1_TAICHIKL_16_RU' \
+    'algorithm=difference_dfot_video' \
     'experiment=video_generation' \
     \
     dataset=taichi \
@@ -8,8 +8,8 @@ python main.py \
     dataset.latent.suffix=kl_f8_autoencoder \
     dataset.latent.shape=null \
     \
-    algorithm/backbone=dit3d_factorized_attention \
-    '@DiT/XL' \
+    algorithm/backbone=difference_dit3d_factorized_matrix \
+    '@FacMatDiT/group_XL/XL-64-1' \
     algorithm.backbone.patch_size=2 \
     \
     algorithm/vae=kl_autoencoder_preprocessor \
@@ -24,6 +24,5 @@ python main.py \
     experiment.training.max_steps=200000 \
     experiment.training.optim.accumulate_grad_batches=4 \
     \
-    resume=/scratch/s224075134/temporal_diffusion/diffusion-forcing-transformer/outputs/video_generation/training/taichi/dfot_video/2025-07-30/09-57-45/checkpoints/checkpoint_100000 \
     cluster=a2i2_singlegpu \
     cluster.params.gpu_type=h100

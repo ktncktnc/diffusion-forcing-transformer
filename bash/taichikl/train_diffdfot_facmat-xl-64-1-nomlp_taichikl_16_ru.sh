@@ -1,5 +1,5 @@
 python main.py \
-    '+name=Diffv2DFOT_FacMat-XL_TAICHIKL_16_RU' \
+    '+name=DiffDFOT_FacMat-XL-64-1-NoMLP_TAICHIKL_16_RU' \
     'algorithm=difference_dfot_video' \
     'experiment=video_generation' \
     \
@@ -9,19 +9,21 @@ python main.py \
     dataset.latent.shape=null \
     \
     algorithm/backbone=difference_dit3d_factorized_matrix \
-    '@FacMatDiT/XL' \
+    '@FacMatDiT/group_XL/XL-64-1' \
+    algorithm.backbone.spatial_mlp_ratio=0.0 \
     algorithm.backbone.patch_size=2 \
     \
     algorithm/vae=kl_autoencoder_preprocessor \
     algorithm.vae.pretrained_path=stabilityai/sd-vae-ft-ema \
-    algorithm.vae.batch_size=16 \
+    algorithm.vae.batch_size=8 \
     \
     algorithm.noise_level=random_uniform \
     algorithm.variable_context.enabled=True \
     \
-    experiment.training.batch_size=8 \
-    experiment.validation.batch_size=8 \
+    experiment.training.batch_size=4 \
+    experiment.validation.batch_size=4 \
     experiment.training.max_steps=200000 \
-    experiment.training.optim.accumulate_grad_batches=2 \
+    experiment.training.optim.accumulate_grad_batches=4 \
     \
-    wandb.mode=disabled
+    cluster=a2i2_singlegpu \
+    cluster.params.gpu_type=h100
