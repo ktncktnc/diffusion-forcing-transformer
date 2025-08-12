@@ -662,7 +662,7 @@ class DFoTVideo(BaseVideoAlgo):
                 leave=False,
             )
 
-        for m in range(scheduling_matrix.shape[0] - 1):
+        for i, m in enumerate(range(scheduling_matrix.shape[0] - 1)):
             from_noise_levels = scheduling_matrix[m]
             to_noise_levels = scheduling_matrix[m + 1]
 
@@ -745,7 +745,8 @@ class DFoTVideo(BaseVideoAlgo):
             xs_pred = torch.where(
                 self._extend_x_dim(context_mask) == 0, xs_pred, xs_pred_prev
             )
-            pbar.update(1)
+            if i % 10 == 0:
+                pbar.update(10)
 
         if return_all:
             record.append(xs_pred.clone())
