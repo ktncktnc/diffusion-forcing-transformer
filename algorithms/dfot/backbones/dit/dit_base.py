@@ -132,6 +132,7 @@ class DiTBase(nn.Module):
             self.num_col_heads = self.kwargs.get("num_col_heads")
             self.num_row_heads = self.kwargs.get("num_row_heads")
             self.spatial_mlp_ratio = kwargs.get("spatial_mlp_ratio")
+            self.use_bias = kwargs.get("use_bias")
 
             assert self.matrix_block in matrix_blocks, f"Unknown matrix block {self.matrix_block}"
             assert self.embed_col_dim is not None and self.embed_row_dim is not None, "embed_col_dim and embed_row_dim must be specified for matrix attention"
@@ -139,6 +140,7 @@ class DiTBase(nn.Module):
             assert self.embed_col_dim % self.num_col_heads == 0, "embed_col_dim must be divisible by num_col_heads"
             assert self.embed_row_dim % self.num_row_heads == 0, "embed_row_dim must be divisible by num_row_heads"
             assert self.spatial_mlp_ratio is not None, "spatial_mlp_ratio must be specified for matrix attention"
+            assert self.use_bias is not None, "use_bias must be specified for matrix attention"
 
             self.matrix_dim = self.embed_col_dim // self.num_col_heads * self.embed_row_dim // self.num_row_heads
             self.flatten_matrix_rope = kwargs.get("flatten_matrix_rope")
@@ -167,7 +169,8 @@ class DiTBase(nn.Module):
                     rope=self.rope,
                     matrix_rope=self.temporal_rope,
                     flatten_matrix_rope=self.flatten_matrix_rope,
-                    matrix_multi_token=self.matrix_multi_token
+                    matrix_multi_token=self.matrix_multi_token,
+                    use_bias=self.use_bias
                 ))
             # Add DiT blocks for other variants.
             # NOTE: if full DiT, will use MLP.
@@ -205,7 +208,8 @@ class DiTBase(nn.Module):
                         rope=self.rope,
                         matrix_rope=self.temporal_rope,
                         flatten_matrix_rope=self.flatten_matrix_rope,
-                        matrix_multi_token=self.matrix_multi_token
+                        matrix_multi_token=self.matrix_multi_token,
+                        use_bias=self.use_bias
                     ))
                 else:
                     self.temporal_blocks.append(DiTBlock(

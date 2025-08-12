@@ -74,6 +74,7 @@ class DiT3D(BaseBackbone):
             matrix_block=cfg.get("matrix_block", None),
             flatten_matrix_rope=cfg.get("flatten_matrix_rope", None),
             matrix_multi_token=cfg.get("matrix_multi_token", None),
+            use_bias=cfg.get("use_bias", None),
         )
         self.initialize_weights()
 

@@ -233,7 +233,7 @@ class MatrixAttention(nn.Module):
         rope = None,
         flatten_rope=False,
         multi_token=False,
-        **kwargs
+        use_bias=False,
         # fused_attn: bool = True,
     ):
         super().__init__()
@@ -250,6 +250,8 @@ class MatrixAttention(nn.Module):
         self.rope = rope
         self.flatten_rope = flatten_rope
         self.multi_token = multi_token
+        self.use_bias = use_bias
+
         assert not (self.flatten_rope and self.multi_token), "flatten_rope and multi_token cannot be used together."
 
         self.head_col_dim = self.embed_col_dim // num_col_heads
@@ -262,6 +264,7 @@ class MatrixAttention(nn.Module):
 
         self.qkv_u = nn.Parameter(torch.rand(col_dim, self.embed_col_dim))
         self.qkv_v = nn.Parameter(torch.rand(row_dim, self.embed_row_dim*3))
+
         self.q_norm = norm_layer([self.head_col_dim, self.head_row_dim]) if qk_norm else nn.Identity()
         self.k_norm = norm_layer([self.head_col_dim, self.head_row_dim]) if qk_norm else nn.Identity()
         self.attn_drop = nn.Dropout(attn_drop)
@@ -269,6 +272,9 @@ class MatrixAttention(nn.Module):
         self.proj_v = nn.Parameter(torch.rand(self.embed_row_dim, row_dim))
         self.proj_drop = nn.Dropout(proj_drop)
 
+        if self.use_bias:
+            self.qkv_bias = nn.Parameter(torch.rand(self.embed_col_dim, self.embed_row_dim*3))
+            self.proj_bias = nn.Parameter(torch.rand(col_dim, row_dim))
 
     def forward(
         self, 
@@ -279,9 +285,16 @@ class MatrixAttention(nn.Module):
     ) -> torch.Tensor:
         if hasattr(self, "store_attn_map"):
             raise NotImplementedError("MatrixAttention does not support storing attention maps.")
-    
+
+        # B: batch_size
+        # L: n_frames
+        # N: n_tokens per frame
+        # D: dim of a token
         B, L, N, D = x.shape
-        qkv = matrix_mul(x, self.qkv_u, self.qkv_v) # BLH*3,W
+        qkv = matrix_mul(x, self.qkv_u, self.qkv_v) # B, L, N_E*3, D_E
+        if self.use_bias:
+            qkv = qkv + self.qkv_bias.unsqueeze(0).unsqueeze(0)  # Add bias if specified
+
         qkv = rearrange(qkv, 'b l (c n) (k r d) -> k b c r l n d', b=B, l=L, c=self.num_col_heads, n=self.head_col_dim, k=3, r=self.num_row_heads, d=self.head_row_dim)
         q, k, v = qkv.unbind(0) # batch_size, num_col_heads, num_row_heads, n_tokens, height, width
         q, k = self.q_norm(q), self.k_norm(k) 
@@ -319,23 +332,37 @@ class MatrixAttention(nn.Module):
             x = rearrange(x, 'b c r l n d -> b l (c n) (r d)')  # (B, L, num_col_heads * head_col_dim, num_row_heads * head_row_dim)
 
         x = matrix_mul(x, self.proj_u, self.proj_v)  # (B, N, C)
+        if self.use_bias:
+            x = x + self.proj_bias.unsqueeze(0).unsqueeze(0)  # Add bias if specified
+
         x = self.proj_drop(x)
 
         return x
     
     def __repr__(self):
-        return (
-            f"{self.__class__.__name__}(\n"
+        rep = (f"{self.__class__.__name__}(\n"
             f"  (qkv_u): Parameter(shape={tuple(self.qkv_u.shape)})\n"
-            f"  (qkv_v): Parameter(shape={tuple(self.qkv_v.shape)})\n"
+            f"  (qkv_v): Parameter(shape={tuple(self.qkv_v.shape)})\n")
+        if self.use_bias:
+            rep += (
+                f"  (qkv_bias): Parameter(shape={tuple(self.qkv_bias.shape)})\n"
+            )
+        rep += (
             f"  (q_norm): {self.q_norm}\n"
             f"  (k_norm): {self.k_norm}\n"
             f"  (attn_drop): {self.attn_drop}\n"
             f"  (proj_u): Parameter(shape={tuple(self.proj_u.shape)})\n"
             f"  (proj_v): Parameter(shape={tuple(self.proj_v.shape)})\n"
+        )
+        if self.use_bias:
+            rep += (
+                f"  (proj_bias): Parameter(shape={tuple(self.proj_bias.shape)})\n" 
+            )
+        rep += (
             f"  (proj_drop): {self.proj_drop}\n"
             f")"
         )
+        return rep
 
 class AdaLayerNorm(nn.Module):
     """
@@ -525,6 +552,7 @@ class MatrixDiTBlock(nn.Module):
         matrix_rope: Optional[RotaryEmbeddingND] = None,
         flatten_matrix_rope: bool = False,
         matrix_multi_token: bool = False,
+        use_bias: bool = False,
         **block_kwargs: dict,
     ):
         """
@@ -547,6 +575,7 @@ class MatrixDiTBlock(nn.Module):
             rope=matrix_rope,
             flatten_rope=flatten_matrix_rope,
             multi_token=matrix_multi_token,
+            use_bias=use_bias,
             #**block_kwargs
         )
         self.use_mlp = mlp_ratio is not None
@@ -572,6 +601,9 @@ class MatrixDiTBlock(nn.Module):
                 nn.init.xavier_uniform_(module.qkv_v)
                 nn.init.xavier_uniform_(module.proj_u)
                 nn.init.xavier_uniform_(module.proj_v)
+                if module.use_bias:
+                    nn.init.zeros_(module.qkv_bias)
+                    nn.init.zeros_(module.proj_bias)
             
         self.attn.apply(_basic_init)
         if self.use_mlp:
@@ -672,6 +704,9 @@ class MatrixCrossDiTBlock(nn.Module):
                 nn.init.xavier_uniform_(module.qkv_v)
                 nn.init.xavier_uniform_(module.proj_u)
                 nn.init.xavier_uniform_(module.proj_v)
+                if module.use_bias:
+                    nn.init.zeros_(module.qkv_bias)
+                    nn.init.zeros_(module.proj_bias)
 
         self.attn1.apply(_basic_init)
         self.attn2.apply(_basic_init)
@@ -787,6 +822,9 @@ class MatrixSelfDiTBlock(nn.Module):
                 nn.init.xavier_uniform_(module.qkv_v)
                 nn.init.xavier_uniform_(module.proj_u)
                 nn.init.xavier_uniform_(module.proj_v)
+                if module.use_bias:
+                    nn.init.zeros_(module.qkv_bias)
+                    nn.init.zeros_(module.proj_bias)
 
         self.attn1.apply(_basic_init)
         self.attn2.apply(_basic_init)

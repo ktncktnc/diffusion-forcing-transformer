@@ -459,7 +459,7 @@ class SimpleVideoGenerationExperiment:
         model.generator = None
         model.num_logged_videos = 0
         self.num_logged_videos = 0
-        self.model.new_on_validation_epoch_end()
+        model.new_on_validation_epoch_end()
         model.train()
 
         # Restore EMA if it was used
