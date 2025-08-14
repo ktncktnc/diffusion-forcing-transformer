@@ -151,7 +151,7 @@ class SimpleVideoGenerationExperiment:
 
     def training(self) -> None:
         from accelerate.utils import InitProcessGroupKwargs
-        timeout = InitProcessGroupKwargs(timeout=datetime.timedelta(minutes=15))
+        timeout = InitProcessGroupKwargs(timeout=datetime.timedelta(minutes=30))
         accelerator = Accelerator(
             mixed_precision=self.cfg.experiment.training.precision,
             gradient_accumulation_steps=self.cfg.experiment.training.optim.accumulate_grad_batches,
@@ -237,6 +237,7 @@ class SimpleVideoGenerationExperiment:
         logger.info(f"  Num batches: {len(train_loader)}")
         logger.info(f"  Num workers: {self.data_module._get_num_workers(self.cfg.experiment.training.data.num_workers)}")
         logger.info(f"  Gradient clipping value: {gradient_clip_val}")
+        logger.info(f"  Validation frequency: {val_freq}")
 
         self.global_step = 1
         if self.ckpt_path:
@@ -311,6 +312,7 @@ class SimpleVideoGenerationExperiment:
                     self.run_validation(val_loader, accelerator)
 
             self.global_step += 1
+
 
         # save final checkpoint
         self.save_checkpoint(self.global_step, accelerator, save_top_k)

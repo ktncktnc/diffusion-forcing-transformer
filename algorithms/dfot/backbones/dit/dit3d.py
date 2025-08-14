@@ -67,6 +67,7 @@ class DiT3D(BaseBackbone):
             mlp_ratio=cfg.mlp_ratio,
             learn_sigma=False,
             use_gradient_checkpointing=cfg.use_gradient_checkpointing,
+            spatial_mlp_ratio=cfg.get("spatial_mlp_ratio", None),
             embed_col_dim=cfg.get("embed_col_dim", None),
             embed_row_dim=cfg.get("embed_row_dim", None),
             num_col_heads=cfg.get("num_col_heads", None),
