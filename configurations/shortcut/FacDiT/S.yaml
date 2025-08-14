@@ -1,0 +1,5 @@
+algorithm:
+  backbone:
+    depth: 6 # 6 for spatial, 6 for temporal
+    hidden_size: 384
+    num_heads: 6

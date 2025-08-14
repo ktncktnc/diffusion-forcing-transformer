@@ -20,7 +20,8 @@ launch_template: |
   #SBATCH --ntasks-per-node=1
   #SBATCH --cpus-per-task={num_cpus}
   #SBATCH --mem={memory}
-  #SBATCH --gres=gpu:{gpu_type}:{num_gpus}
+  #SBATCH --gpus={num_gpus}
+  #SBATCH --constraint=gpu-{gpu_type}
 
   #SBATCH --mail-user={email}
   #SBATCH --mail-type=FAIL
@@ -62,9 +63,11 @@ launch_template: |
   SRUN_ARGS=" \
     --wait=60 \
     --kill-on-bad-exit=1 \
-    "
+  "
 
   CMD="main.py {python_args}"
+  
+  echo $CMD
   
   echo srun $SRUN_ARGS --jobid $SLURM_JOB_ID bash -c "$LAUNCHER $CMD"
   

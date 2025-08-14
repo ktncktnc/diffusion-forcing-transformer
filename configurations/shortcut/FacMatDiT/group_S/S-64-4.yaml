@@ -5,4 +5,4 @@ algorithm:
     embed_row_dim: 384
     num_col_heads: 4
     num_row_heads: 6
-    depth: 12
+    depth: 6
