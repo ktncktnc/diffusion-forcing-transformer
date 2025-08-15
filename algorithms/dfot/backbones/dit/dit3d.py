@@ -76,7 +76,8 @@ class DiT3D(BaseBackbone):
             flatten_matrix_rope=cfg.get("flatten_matrix_rope", None),
             matrix_multi_token=cfg.get("matrix_multi_token", None),
             use_bias=cfg.get("use_bias", None),
-            fixed_u=cfg.get('fixed_u', None)
+            fixed_u=cfg.get('fixed_u', None),
+            use_temporal_rope=cfg.get('use_temporal_rope', None)
         )
         self.initialize_weights()
 

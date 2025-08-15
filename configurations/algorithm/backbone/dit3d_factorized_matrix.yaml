@@ -1,6 +1,7 @@
 name: dit3d 
 variant: factorized_matrix_attention
 pos_emb_type: sinusoidal_2d # for spatial embedding, already add rope1d to matrix attention.
+use_temporal_rope: True
 patch_size: 2
 hidden_size: null
 embed_col_dim: 1

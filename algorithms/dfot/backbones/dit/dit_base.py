@@ -134,6 +134,7 @@ class DiTBase(nn.Module):
             self.num_row_heads = self.kwargs.get("num_row_heads")
             self.use_bias = kwargs.get("use_bias")
             self.fixed_u = kwargs.get("fixed_u", None)
+            self.use_temporal_rope = kwargs.get("use_temporal_rope", False)
 
             assert self.matrix_block in matrix_blocks, f"Unknown matrix block {self.matrix_block}"
             assert self.embed_col_dim is not None and self.embed_row_dim is not None, "embed_col_dim and embed_row_dim must be specified for matrix attention"
@@ -293,12 +294,18 @@ class DiTBase(nn.Module):
                         merge_type=self.kwargs.get("merge_type", None)
                     )
 
-        if self.is_matrix_attention:
+        if self.is_matrix_attention and self.use_temporal_rope:
             # NOTE: RoPE will be added for each row of the matrix independently. Doing this makes sure every row has its own frequencies. If we flatten the row and column, frequencies will be smaller by row.
+            if self.flatten_matrix_rope:
+                dim = self.embed_row_dim // self.num_row_heads * self.embed_col_dim // self.num_col_heads
+            else:
+                dim = self.embed_row_dim // self.num_row_heads
             self.temporal_rope = RotaryEmbedding1D(
-                    dim=self.embed_row_dim // self.num_row_heads,
+                    dim=dim,
                     seq_len=self.max_temporal_length
                 )
+        else:
+            self.temporal_rope = None
     
     def forward(
         self, 
@@ -389,6 +396,11 @@ class DiTBase(nn.Module):
             # Factorized matrix attention
             if self.is_matrix_factorized:
                 #processor.execute(lambda x, c, batch_size: rearrange_contiguous_many((x, c), "(b t) p c -> b (p t) c", b=batch_size))
+                if i == 0 and self.pos_emb_type == "sinusoidal_factorized":
+                    processor.execute(rearrange_cont_lambda("(b t) p c -> (b p) t c"))
+                    processor.execute(lambda x, c, batch_size: self.temporal_pos_emb(x))
+                    processor.execute(rearrange_cont_lambda("(b p) t c -> (b t) p c"))
+                    
                 processor.execute(rearrange_cont_lambda("(b t) p c -> b (t p) c"))
                 processor.execute(lambda x, c, batch_size: self.checkpoint(temporal_block, x, c, t, height, width))
                 processor.execute(rearrange_cont_lambda("b (t p) c -> (b t) p c", p=self.num_patches))
