@@ -1,33 +1,31 @@
 python main.py \
-    '+name=DFOT_FacMat-S-64-4-Bias-MToken_TAICHIKL_16_Res128_RU' \
+    '+name=DFOT_FacMat-XL-64-8-Bias_TAICHIKL_16_RU' \
     'algorithm=dfot_video' \
     'experiment=video_generation' \
     \
     dataset=taichi \
-    dataset.resolution=128 \
     dataset.max_frames=16 \
     dataset.latent.suffix=kl_f8_autoencoder \
     dataset.latent.shape=null \
     \
     algorithm/backbone=dit3d_factorized_matrix \
-    '@FacMatDiT/group_S/S-64-4' \
+    '@FacMatDiT/group_XL/XL-64-8' \
+    algorithm.backbone.spatial_mlp_ratio=4.0 \
     algorithm.backbone.use_bias=True \
-    algorithm.backbone.matrix_multi_token=True \
     algorithm.backbone.patch_size=2 \
     \
     algorithm/vae=kl_autoencoder_preprocessor \
     algorithm.vae.pretrained_path=stabilityai/sd-vae-ft-ema \
-    algorithm.vae.batch_size=16 \
+    algorithm.vae.batch_size=2 \
     \
     algorithm.noise_level=random_uniform \
     algorithm.variable_context.enabled=True \
     \
-    experiment.training.batch_size=16 \
+    experiment.training.batch_size=8 \
+    experiment.validation.batch_size=2 \
     experiment.training.max_steps=200000 \
-    experiment.training.optim.accumulate_grad_batches=4 \
-    \
-    experiment.validation.val_every_n_step=9999999999 \
+    experiment.training.optim.accumulate_grad_batches=2 \
     \
     cluster=a2i2_multigpu \
     cluster.params.gpu_type=v100 \
-    cluster.params.num_gpus=2
+    cluster.params.num_gpus=4

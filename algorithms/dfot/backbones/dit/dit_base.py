@@ -124,6 +124,7 @@ class DiTBase(nn.Module):
         self.depth = depth
         self.hidden_size = hidden_size
         self.num_heads = num_heads
+        self.spatial_mlp_ratio = kwargs.get("spatial_mlp_ratio")
 
         if self.is_matrix_attention:
             self.matrix_block = kwargs.get("matrix_block")
@@ -131,8 +132,8 @@ class DiTBase(nn.Module):
             self.embed_row_dim = kwargs.get("embed_row_dim")
             self.num_col_heads = self.kwargs.get("num_col_heads")
             self.num_row_heads = self.kwargs.get("num_row_heads")
-            self.spatial_mlp_ratio = kwargs.get("spatial_mlp_ratio")
             self.use_bias = kwargs.get("use_bias")
+            self.fixed_u = kwargs.get("fixed_u", None)
 
             assert self.matrix_block in matrix_blocks, f"Unknown matrix block {self.matrix_block}"
             assert self.embed_col_dim is not None and self.embed_row_dim is not None, "embed_col_dim and embed_row_dim must be specified for matrix attention"
@@ -170,7 +171,8 @@ class DiTBase(nn.Module):
                     matrix_rope=self.temporal_rope,
                     flatten_matrix_rope=self.flatten_matrix_rope,
                     matrix_multi_token=self.matrix_multi_token,
-                    use_bias=self.use_bias
+                    use_bias=self.use_bias,
+                    fixed_u=self.fixed_u,
                 ))
             # Add DiT blocks for other variants.
             # NOTE: if full DiT, will use MLP.
@@ -186,7 +188,7 @@ class DiTBase(nn.Module):
                     self.blocks.append(DiTBlock(
                         hidden_size=hidden_size,
                         num_heads=num_heads,
-                        mlp_ratio=(mlp_ratio if self.variant not in ["factorized_attention"] else None),
+                        mlp_ratio=self.spatial_mlp_ratio,
                         rope=self.rope,
                     ))
         self.blocks = nn.ModuleList(self.blocks)
@@ -209,7 +211,8 @@ class DiTBase(nn.Module):
                         matrix_rope=self.temporal_rope,
                         flatten_matrix_rope=self.flatten_matrix_rope,
                         matrix_multi_token=self.matrix_multi_token,
-                        use_bias=self.use_bias
+                        use_bias=self.use_bias,
+                        fixed_u=self.fixed_u,
                     ))
                 else:
                     self.temporal_blocks.append(DiTBlock(
@@ -386,9 +389,9 @@ class DiTBase(nn.Module):
             # Factorized matrix attention
             if self.is_matrix_factorized:
                 #processor.execute(lambda x, c, batch_size: rearrange_contiguous_many((x, c), "(b t) p c -> b (p t) c", b=batch_size))
-                processor.execute(rearrange_cont_lambda("(b t) p c -> b (p t) c"))
+                processor.execute(rearrange_cont_lambda("(b t) p c -> b (t p) c"))
                 processor.execute(lambda x, c, batch_size: self.checkpoint(temporal_block, x, c, t, height, width))
-                processor.execute(rearrange_cont_lambda("b (p t) c -> (b t) p c", p=self.num_patches))
+                processor.execute(rearrange_cont_lambda("b (t p) c -> (b t) p c", p=self.num_patches))
 
             elif self.is_factorized:
                 processor.execute(rearrange_cont_lambda("(b t) p c -> (b p) t c"))

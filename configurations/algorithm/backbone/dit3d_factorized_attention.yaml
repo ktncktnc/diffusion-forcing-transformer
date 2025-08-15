@@ -6,4 +6,5 @@ hidden_size: 384
 depth: 12
 num_heads: 6
 mlp_ratio: 4.0
+spatial_mlp_ratio: 0.0
 use_gradient_checkpointing: True

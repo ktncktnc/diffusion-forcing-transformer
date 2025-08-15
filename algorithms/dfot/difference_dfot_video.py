@@ -145,7 +145,7 @@ class DifferenceDFoTVideo(BaseVideoAlgo):
         return output_dict
 
     @torch.no_grad()
-    def new_validation_step(self, batch, batch_idx, accelerator: Accelerator, namespace="validation") -> STEP_OUTPUT:
+    def new_validation_step(self, batch, batch_idx, accelerator: Accelerator, namespace="validation", validate_sample=True) -> STEP_OUTPUT:
         """
         dataloader_idx: 0 for training, 1 for validation
         """
@@ -153,8 +153,10 @@ class DifferenceDFoTVideo(BaseVideoAlgo):
         denoising_output = self._new_eval_denoising(batch, batch_idx, namespace=namespace)
         # 2. Sample all videos (based on the specified tasks)
         # and log the generated videos and metrics.
-        all_videos = self._sample_all_videos(batch, batch_idx, namespace, n_context_tokens=self.n_context_tokens)
-        # self._log_videos(all_videos, namespace, self.n_context_frames)
+        all_videos = None
+        if validate_sample:
+            all_videos = self._sample_all_videos(batch, batch_idx, namespace, n_context_tokens=self.n_context_tokens)
+
         return denoising_output, all_videos
 
 

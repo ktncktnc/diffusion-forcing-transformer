@@ -178,7 +178,8 @@ class SimpleVideoGenerationExperiment:
         if self.cfg.experiment.training.manual_seed is not None:
             set_seed(self.cfg.experiment.training.manual_seed, device_specific=True)
 
-        self.metrics = self._build_metrics(device=device)
+        # self.metrics = self._build_metrics(device=device)
+        self.metrics = None
         self.model, optimizer, train_loader, val_loader, lr_scheduler = accelerator.prepare(
             self.model, optimizer, train_loader, val_loader, lr_scheduler
         )
@@ -231,6 +232,7 @@ class SimpleVideoGenerationExperiment:
         if lr_scheduler:
             logger.info(f"  Learning Rate Scheduler {lr_scheduler}")
         logger.info(f"  Dataset: {self.data_module.root_cfg.dataset._name}")
+        logger.info(f"  Resolution: {self.cfg.dataset.resolution}")
         logger.info(f"  Num training steps {self.cfg.experiment.training.max_steps}")
         logger.info(f"  Batch size: {self.cfg.experiment.training.batch_size}")
         logger.info(f"  Num examples: {len(train_loader.dataset)}")
@@ -238,6 +240,7 @@ class SimpleVideoGenerationExperiment:
         logger.info(f"  Num workers: {self.data_module._get_num_workers(self.cfg.experiment.training.data.num_workers)}")
         logger.info(f"  Gradient clipping value: {gradient_clip_val}")
         logger.info(f"  Validation frequency: {val_freq}")
+        logger.info(f"  Checkpointing frequency: {checkpointing_freq}")
 
         self.global_step = 1
         if self.ckpt_path:
@@ -295,21 +298,21 @@ class SimpleVideoGenerationExperiment:
             if accelerator.is_main_process and self.logger and log_grad_norm_freq and self.global_step % log_grad_norm_freq == 0:
                 norms = grad_norm(get_org_model(self.model).diffusion_model, norm_type=2)
                 self.log_dict(norms, None)
+                
+            # Save checkpoints 
+            if accelerator.is_main_process and checkpointing_freq and self.global_step % checkpointing_freq == 0:
+                self.save_checkpoint(self.global_step, accelerator, save_top_k)
 
             if accelerator.sync_gradients:
                 # EMA update
                 if self.ema:
                     self.ema.step(accelerator.unwrap_model(self.model))
 
-                # Save checkpoints 
-                if checkpointing_freq and self.global_step % checkpointing_freq == 0:
-                    self.save_checkpoint(self.global_step, accelerator, save_top_k)
-
                 # Validation step
                 if val_freq and self.global_step % val_freq == 0:
                     accelerator.wait_for_everyone()
                     # if accelerator.is_main_process:
-                    self.run_validation(val_loader, accelerator)
+                    self.run_validation(val_loader, accelerator, validate_sample=False)
 
             self.global_step += 1
 
@@ -339,19 +342,47 @@ class SimpleVideoGenerationExperiment:
 
         self.metrics = self._build_metrics(device=device)
         self.model, val_loader = accelerator.prepare(self.model, val_loader)
-        self.resume_checkpoint(accelerator, self.ckpt_path)
+        
         params = get_org_model(self.model).get_params()
-
         logger.info(f"  Model: {self.model}")
         logger.info(f"  Total trainable parameters: {params['total_trainable']:,d}")
         logger.info(f"  Total frozen parameters: {params['total_frozen']:,d}")
         logger.info(f"  Total parameters: {params['total']:,d}")
         logger.info(f"Sampling step: {self.cfg.algorithm.diffusion.sampling_timesteps}")
         logger.info(f"Scheduling matrix: {self.cfg.algorithm.scheduling_matrix}")
-        self.run_validation(val_loader, accelerator)
+        
+        log_losses = {}
+        metrics = {}
+        if self.cfg.experiment.validation.val_all_ckpt:
+            # list all available ckpts
+            checkpoints, ckpt_paths = self.list_checkpoints(self.ckpt_path)
+            logger.info(f"  Found {len(checkpoints)} checkpoints: {checkpoints}")
+            for ckpt_idx, ckpt_path in zip(checkpoints[-1:], ckpt_paths[-1:]):
+                logger.info(f"  Evaluating checkpoint {ckpt_idx}")
+
+                self.resume_checkpoint(accelerator, ckpt_path)
+                log_loss, result = self.run_validation(val_loader, accelerator)
+                # append to dict
+                for k in log_loss:
+                    if k not in log_losses:
+                        log_losses[k] = []
+                    log_losses[k].append(log_loss[k])
+
+                for k in result:
+                    if k not in metrics:
+                        metrics[k] = []
+                    metrics[k].append(result[k].cpu().item())
+
+            logger.info("Final result")
+            logger.info(f"Log loss: {log_losses}")
+            logger.info(f"Metrics: {metrics}")
+        
+        else:
+            self.resume_checkpoint(accelerator, self.ckpt_path)
+            self.run_validation(val_loader, accelerator)
         
 
-    def run_validation(self, val_loader, accelerator, validate_ema=True, namespace='validation') -> None:
+    def run_validation(self, val_loader, accelerator, validate_ema=True, validate_sample=True, namespace='validation') -> None:
         # Load EMA if enabled
         val_yielder = make_infinite_loader(val_loader)
         model = accelerator.unwrap_model(self.model)
@@ -379,11 +410,11 @@ class SimpleVideoGenerationExperiment:
                 if i >= num_validate_batches:
                     break
                 
-                if (i + 1) % 10 == 0:
+                if (i + 1) % 5 == 0:
                     logger.info(f"Validation batch {i + 1}/{num_validate_batches}...", main_process_only=False)
                 # Preprocess
                 batch = model.on_after_batch_transfer(batch, i)
-                denoising_output, all_videos = model.new_validation_step(batch, i, accelerator, namespace="validation")
+                denoising_output, all_videos = model.new_validation_step(batch, i, accelerator, validate_sample=validate_sample, namespace="validation")
 
                 loss_scalar = denoising_output["loss"].mean()
                 
@@ -398,8 +429,6 @@ class SimpleVideoGenerationExperiment:
                     total_diff_loss += gathered_diff_loss.mean().item()
                 if gathered_xs_loss.sum().item() > 0:
                     total_xs_loss += gathered_xs_loss.mean().item()
-                
-                gathered_videos = accelerator.gather_for_metrics(all_videos)
 
                 if accelerator.is_main_process:
                     gt_videos = denoising_output["gts"]
@@ -419,13 +448,19 @@ class SimpleVideoGenerationExperiment:
                         )
 
                     # Log samples
-                    if self.logger and num_videos_to_log > 0:
-                        self.log_videos(all_videos, namespace=namespace, context_frames=model.n_context_frames, global_step=i)
+                    if all_videos is not None:
+                        gathered_videos = accelerator.gather_for_metrics(all_videos)
+                        if self.logger and num_videos_to_log > 0:
+                            self.log_videos(all_videos, namespace=namespace, context_frames=model.n_context_frames, global_step=i)
                 
-                    # Update metrics
-                    self.update_metrics(gathered_videos)
+                        # Update metrics
+                        self.update_metrics(gathered_videos)
+                        del gathered_videos
 
-                del gathered_videos, all_videos, denoising_output
+                if all_videos is not None:
+                    del all_videos
+
+                del denoising_output
                 gc.collect()
                 torch.cuda.empty_cache()
         
@@ -451,11 +486,14 @@ class SimpleVideoGenerationExperiment:
                 self.logger.log_metrics(log_loss, step=self.global_step)
 
             # compute metrics
-            for task in self.tasks:
-                logger.info(f"Validation {task} metrics:")
-                result = self.metrics[task].log(task)
-                # Log metrics
-                self.log_dict(result, namespace, is_print=True)
+            if validate_sample:
+                for task in self.tasks:
+                    logger.info(f"Validation {task} metrics:")
+                    result = self.metrics[task].log(task)
+                    # Log metrics
+                    self.log_dict(result, namespace, is_print=True)
+            else:
+                result = None
 
         # Remove unnecessary components
         model.generator = None
@@ -470,6 +508,10 @@ class SimpleVideoGenerationExperiment:
             self.ema.restore(model)
 
         logger.info("********** Validation completed **********\n")
+        if accelerator.is_main_process:
+            return log_loss, result
+        else:
+            return None, None
 
     def update_metrics(self, all_videos) -> None:
         # only consider the first n_metrics_frames for evaluation
@@ -595,7 +637,7 @@ class SimpleVideoGenerationExperiment:
             checkpoints = os.listdir(save_dir)
             checkpoints = [d for d in checkpoints if d.startswith('checkpoint')]
             checkpoints = sorted(checkpoints, key=lambda x: int(x.split('_')[1]))
-            if len(checkpoints) > save_top_k:
+            if len(checkpoints) >= save_top_k:
                 num_to_remove = len(checkpoints) - save_top_k + 1
                 removing_checkpoints = checkpoints[0:num_to_remove]
 
@@ -613,6 +655,14 @@ class SimpleVideoGenerationExperiment:
             ema_save_path = os.path.join(save_path, "ema.safetensors")
             save_file(self.ema.state_dict(), ema_save_path)
             logger.info(f"EMA state saved to {ema_save_path}")
+
+    def list_checkpoints(self, ckpt_root_path: str):
+        checkpoints = os.listdir(ckpt_root_path)
+        checkpoints = [d for d in checkpoints if d.startswith('checkpoint')]
+        checkpoints = sorted(checkpoints, key=lambda x: int(x.split('_')[1]))
+
+        ckpt_paths = [os.path.join(ckpt_root_path, ckpt) for ckpt in checkpoints]
+        return checkpoints, ckpt_paths
 
     def exec_task(self, task: str) -> None:
         """

@@ -234,6 +234,7 @@ class MatrixAttention(nn.Module):
         flatten_rope=False,
         multi_token=False,
         use_bias=False,
+        fixed_u=None
         # fused_attn: bool = True,
     ):
         super().__init__()
@@ -262,13 +263,22 @@ class MatrixAttention(nn.Module):
         else:
             self.scale = (self.head_col_dim*self.head_row_dim)**-0.5
 
-        self.qkv_u = nn.Parameter(torch.rand(col_dim, self.embed_col_dim))
+        self.fixed_u = fixed_u
+        if fixed_u == 'identity':
+            self.qkv_u = torch.eye(col_dim, col_dim).to(torch.float32)
+            self.proj_u = torch.eye(col_dim, col_dim).to(torch.float32)
+        elif fixed_u is None:
+            self.qkv_u = nn.Parameter(torch.rand(col_dim, self.embed_col_dim))
+            self.proj_u = nn.Parameter(torch.rand(self.embed_col_dim, col_dim))
+        else:
+            raise ValueError(f"Invalid fixed_u value: {self.fixed_u}. It should be 'identity', None")
+
         self.qkv_v = nn.Parameter(torch.rand(row_dim, self.embed_row_dim*3))
 
         self.q_norm = norm_layer([self.head_col_dim, self.head_row_dim]) if qk_norm else nn.Identity()
         self.k_norm = norm_layer([self.head_col_dim, self.head_row_dim]) if qk_norm else nn.Identity()
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj_u = nn.Parameter(torch.rand(self.embed_col_dim, col_dim))
+    
         self.proj_v = nn.Parameter(torch.rand(self.embed_row_dim, row_dim))
         self.proj_drop = nn.Dropout(proj_drop)
 
@@ -291,7 +301,7 @@ class MatrixAttention(nn.Module):
         # N: n_tokens per frame
         # D: dim of a token
         B, L, N, D = x.shape
-        qkv = matrix_mul(x, self.qkv_u, self.qkv_v) # B, L, N_E*3, D_E
+        qkv = matrix_mul(x, self.qkv_u.to(x.device), self.qkv_v) # B, L, N_E*3, D_E
         if self.use_bias:
             qkv = qkv + self.qkv_bias.unsqueeze(0).unsqueeze(0)  # Add bias if specified
 
@@ -331,7 +341,7 @@ class MatrixAttention(nn.Module):
             x = torch.einsum('bcrlk,bcrknd->bcrlnd', self.attn_drop(attn_map), v) # (B, col_num_head, row_num_head, num_tokens, H, W)
             x = rearrange(x, 'b c r l n d -> b l (c n) (r d)')  # (B, L, num_col_heads * head_col_dim, num_row_heads * head_row_dim)
 
-        x = matrix_mul(x, self.proj_u, self.proj_v)  # (B, N, C)
+        x = matrix_mul(x, self.proj_u.to(x.device), self.proj_v)  # (B, N, C)
         if self.use_bias:
             x = x + self.proj_bias.unsqueeze(0).unsqueeze(0)  # Add bias if specified
 
@@ -340,8 +350,9 @@ class MatrixAttention(nn.Module):
         return x
     
     def __repr__(self):
+        u_type = 'Parameter' if isinstance(self.qkv_u, nn.Parameter) else 'Tensor'
         rep = (f"{self.__class__.__name__}(\n"
-            f"  (qkv_u): Parameter(shape={tuple(self.qkv_u.shape)})\n"
+            f"  (qkv_u): {u_type}(shape={tuple(self.qkv_u.shape)})\n"
             f"  (qkv_v): Parameter(shape={tuple(self.qkv_v.shape)})\n")
         if self.use_bias:
             rep += (
@@ -351,7 +362,7 @@ class MatrixAttention(nn.Module):
             f"  (q_norm): {self.q_norm}\n"
             f"  (k_norm): {self.k_norm}\n"
             f"  (attn_drop): {self.attn_drop}\n"
-            f"  (proj_u): Parameter(shape={tuple(self.proj_u.shape)})\n"
+            f"  (proj_u): {u_type}(shape={tuple(self.proj_u.shape)})\n"
             f"  (proj_v): Parameter(shape={tuple(self.proj_v.shape)})\n"
         )
         if self.use_bias:
@@ -553,6 +564,7 @@ class MatrixDiTBlock(nn.Module):
         flatten_matrix_rope: bool = False,
         matrix_multi_token: bool = False,
         use_bias: bool = False,
+        fixed_u: Optional[str] = None,
         **block_kwargs: dict,
     ):
         """
@@ -576,9 +588,10 @@ class MatrixDiTBlock(nn.Module):
             flatten_rope=flatten_matrix_rope,
             multi_token=matrix_multi_token,
             use_bias=use_bias,
+            fixed_u=fixed_u,
             #**block_kwargs
         )
-        self.use_mlp = mlp_ratio is not None
+        self.use_mlp = mlp_ratio is not None and mlp_ratio > 0.0
         if self.use_mlp:
             self.norm2 = AdaLayerNormZero(row_hidden_size)
             self.mlp = Mlp(
@@ -597,10 +610,11 @@ class MatrixDiTBlock(nn.Module):
                     nn.init.zeros_(module.bias)
             elif isinstance(module, MatrixAttention):
                 # Initialize the projection matrices in MatrixAttention
-                nn.init.xavier_uniform_(module.qkv_u)
                 nn.init.xavier_uniform_(module.qkv_v)
-                nn.init.xavier_uniform_(module.proj_u)
                 nn.init.xavier_uniform_(module.proj_v)
+                if module.fixed_u is None:
+                    nn.init.xavier_uniform_(module.qkv_u)
+                    nn.init.xavier_uniform_(module.proj_u)
                 if module.use_bias:
                     nn.init.zeros_(module.qkv_bias)
                     nn.init.zeros_(module.proj_bias)
@@ -621,13 +635,17 @@ class MatrixDiTBlock(nn.Module):
         Forward pass of the DiT block.
         In original implementation, conditioning is uniform across all tokens in the sequence. Here, we extend it to support token-wise conditioning (e.g. noise level can be different for each token).
         Args:timesteps
-            x: Input tensor of shape (B, N, C).
+            x: Input tensor of shape (B, (T P), C).
             c: Conditioning tensor of shape (B, N, C).
         """
         B, N, C = x.shape
         n_frames = t.shape[-1]
         x, gate_msa = self.norm1(x, c)
-        x = x + gate_msa * self.attn(x.reshape(B, n_frames, N//n_frames, C), t, height, width).reshape(B, N, C)
+        # x = x + gate_msa * self.attn(x.reshape(B, n_frames, N//n_frames, C), t, height, width).reshape(B, N, C)
+        x = x + gate_msa * rearrange(
+            self.attn(rearrange(x, 'b (t p) c -> b t p c', t=n_frames), t, height, width),
+            'b t p c -> b (t p) c', t=n_frames
+        )
         if self.use_mlp:
             x, gate_mlp = self.norm2(x, c)
             x = x + gate_mlp * self.mlp(x)

@@ -27,6 +27,7 @@ training:
     gradient_clip_val: 1.0
 
 validation:
+  val_all_ckpt: False
   batch_size: 64
   val_every_n_step: 1.0
   val_every_n_epoch: 1

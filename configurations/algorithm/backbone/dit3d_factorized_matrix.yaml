@@ -15,4 +15,5 @@ use_bias: False
 matrix_block: matrix
 flatten_matrix_rope: False
 matrix_multi_token: False
+fixed_u: null
 use_gradient_checkpointing: True

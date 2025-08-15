@@ -27,5 +27,5 @@ python main.py \
     experiment.validation.val_every_n_step=9999999999 \
     \
     cluster=a2i2_multigpu \
-    cluster.params.gpu_type=a100 \
+    cluster.params.gpu_type=v100 \
     cluster.params.num_gpus=2

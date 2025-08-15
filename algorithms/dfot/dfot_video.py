@@ -279,6 +279,7 @@ class DFoTVideo(BaseVideoAlgo):
             initial=0,
             desc="Interpolating with DFoT",
             leave=False,
+            disable=True
         )
         for current_plan in plan:
             # Collect the batched input for the current plan
@@ -437,6 +438,9 @@ class DFoTVideo(BaseVideoAlgo):
             initial=0,
             desc="Predicting with DFoT",
             leave=False,
+            mininterval=5,
+            maxinterval=5,
+            disable=True
         )
         while curr_token < length:
             if record is not None:
@@ -660,6 +664,7 @@ class DFoTVideo(BaseVideoAlgo):
                 initial=0,
                 desc="Sampling with DFoT",
                 leave=False,
+                disable=True
             )
 
         for i, m in enumerate(range(scheduling_matrix.shape[0] - 1)):
@@ -893,6 +898,9 @@ class DFoTVideo(BaseVideoAlgo):
                 initial=0,
                 desc="Sampling with DFoT",
                 leave=False,
+                mininterval=5,
+                maxinterval=5,
+                disable=True
             )
 
         for m in range(scheduling_matrix.shape[0] - 1):

@@ -1,5 +1,5 @@
 python main.py \
-    '+name=DFOT_FacMat-S-64-4-Bias-MToken_TAICHIKL_16_Res128_RU' \
+    '+name=DFOT_FacMat-S-128-1-Bias-MToken_TAICHIKL_16_Res128_RU' \
     'algorithm=dfot_video' \
     'experiment=video_generation' \
     \
@@ -10,7 +10,7 @@ python main.py \
     dataset.latent.shape=null \
     \
     algorithm/backbone=dit3d_factorized_matrix \
-    '@FacMatDiT/group_S/S-64-4' \
+    '@FacMatDiT/group_S/S-128-1' \
     algorithm.backbone.use_bias=True \
     algorithm.backbone.matrix_multi_token=True \
     algorithm.backbone.patch_size=2 \

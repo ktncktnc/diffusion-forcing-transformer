@@ -1,5 +1,5 @@
 python main.py \
-    '+name=DiffDFOT_FacMat-XL-64-1-NoMLP_TAICHIKL_16_RU' \
+    '+name=DiffDFOT_FacMat-XL-64-1-NoMLP-Bias_TAICHIKL_16_RU' \
     'algorithm=difference_dfot_video' \
     'experiment=video_generation' \
     \
@@ -22,9 +22,10 @@ python main.py \
     algorithm.variable_context.enabled=True \
     \
     experiment.training.batch_size=4 \
-    experiment.validation.batch_size=4 \
+    experiment.validation.batch_size=2 \
     experiment.training.max_steps=200000 \
     experiment.training.optim.accumulate_grad_batches=4 \
     \
-    cluster=a2i2_singlegpu \
-    cluster.params.gpu_type=h100
+    cluster=a2i2_multigpu \
+    cluster.params.gpu_type=l40s \
+    cluster.params.num_gpus=4

@@ -52,13 +52,13 @@ experiment:
     optim:
       accumulate_grad_batches: 2
     data:
-      num_workers: 11
+      num_workers: 5
       shuffle: True
     checkpointing:
-      every_n_train_steps: 10000
+      every_n_train_steps: 5000
       every_n_epochs: null
       save_last: True
-      save_top_k: 20
+      save_top_k: 10
       monitor: "prediction/fvd"
   validation:
     batch_size: 16
